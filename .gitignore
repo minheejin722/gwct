@@ -1,0 +1,16 @@
+﻿node_modules/
+.npm/
+.env
+.env.*
+!.env.example
+**/dist/
+**/.expo/
+**/.expo-shared/
+**/coverage/
+**/playwright-report/
+**/test-results/
+apps/server/data/
+apps/server/fixtures/runtime/
+apps/server/.turbo/
+.DS_Store
+Thumbs.db

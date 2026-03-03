@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ScrapeRun {
+  id           String      @id @default(cuid())
+  source       String
+  url          String
+  mode         String
+  startedAt    DateTime    @default(now())
+  finishedAt   DateTime?
+  success      Boolean     @default(false)
+  statusCode   Int?
+  durationMs   Int?
+  htmlHash     String?
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+  rawSnapshots RawSnapshot[]
+  parseErrors  ParseError[]
+
+  @@index([source, startedAt])
+}
+
+model RawSnapshot {
+  id          String    @id @default(cuid())
+  source      String
+  url         String
+  html        String
+  htmlHash    String
+  textContent String?
+  metadata    Json?
+  fetchedAt   DateTime  @default(now())
+  runId       String?
+  run         ScrapeRun? @relation(fields: [runId], references: [id])
+
+  @@index([source, fetchedAt])
+  @@index([htmlHash])
+}
+
+model ParseError {
+  id           String     @id @default(cuid())
+  source       String
+  parserName   String
+  reason       String
+  diagnostics  Json
+  happenedAt   DateTime   @default(now())
+  htmlHash     String?
+  runId        String?
+  run          ScrapeRun? @relation(fields: [runId], references: [id])
+
+  @@index([source, happenedAt])
+}
+
+model VesselScheduleItem {
+  id             String   @id @default(cuid())
+  source         String
+  vesselKey      String
+  vesselName     String
+  terminalVoyage String?
+  berth          String?
+  shippingLine   String?
+  route          String?
+  eta            DateTime?
+  etb            DateTime?
+  ata            DateTime?
+  etd            DateTime?
+  atd            DateTime?
+  status         String?
+  workStartAt    DateTime?
+  workEndAt      DateTime?
+  importCutoffAt DateTime?
+  rawLabelMap    Json
+  signature      String
+  seenAt         DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([source, seenAt])
+  @@index([vesselKey, seenAt])
+  @@index([signature])
+}
+
+model VesselScheduleChangeEvent {
+  id         String   @id @default(cuid())
+  source     String
+  vesselKey  String
+  changeType String
+  fieldName  String?
+  oldValue   String?
+  newValue   String?
+  dedupeKey  String
+  firstSeenAt DateTime
+  lastSeenAt DateTime
+  occurredAt DateTime @default(now())
+  metadata   Json?
+
+  @@index([source, occurredAt])
+  @@index([vesselKey, occurredAt])
+  @@index([dedupeKey, lastSeenAt])
+}
+
+model CraneStatus {
+  id                 String   @id @default(cuid())
+  source             String
+  craneId            String
+  vesselName         String?
+  dischargeDone      Int?
+  loadDone           Int?
+  dischargeRemaining Int?
+  loadRemaining      Int?
+  totalRemaining     Int?
+  progressPercent    Float?
+  signature          String
+  seenAt             DateTime
+
+  @@index([source, seenAt])
+  @@index([craneId, seenAt])
+}
+
+model CraneThresholdRule {
+  id        String   @id @default(cuid())
+  craneId   String   @unique
+  threshold Int
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EquipmentLoginStatus {
+  id           String   @id @default(cuid())
+  source       String
+  equipmentId  String
+  operatorName String?
+  helperName   String?
+  loginText    String?
+  stopReason   String?
+  signature    String
+  seenAt       DateTime
+
+  @@index([source, seenAt])
+  @@index([equipmentId, seenAt])
+}
+
+model EquipmentLoginEvent {
+  id          String   @id @default(cuid())
+  source      String
+  equipmentId String
+  eventType   String
+  oldOperator String?
+  newOperator String?
+  oldHelper   String?
+  newHelper   String?
+  dedupeKey   String
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  occurredAt  DateTime @default(now())
+
+  @@index([source, occurredAt])
+  @@index([equipmentId, occurredAt])
+  @@index([dedupeKey, lastSeenAt])
+}
+
+model YTCountSnapshot {
+  id            String   @id @default(cuid())
+  source        String
+  totalLoggedIn Int
+  totalKnown    Int
+  threshold     Int?
+  signature     String
+  seenAt        DateTime
+
+  @@index([source, seenAt])
+}
+
+model YTThresholdRule {
+  id        String   @id @default(cuid())
+  threshold Int
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WeatherNoticeSnapshot {
+  id                   String   @id @default(cuid())
+  source               String
+  dutyText             String?
+  dispatchTeamDutyText String?
+  noticeHeadline       String?
+  suspensionState      String
+  matchedKeywords      Json
+  severity             String
+  signature            String
+  seenAt               DateTime
+
+  @@index([source, seenAt])
+}
+
+model WeatherAlertEvent {
+  id         String   @id @default(cuid())
+  source     String
+  alertKind  String
+  oldState   String
+  newState   String
+  oldText    String?
+  newText    String?
+  dedupeKey  String
+  firstSeenAt DateTime
+  lastSeenAt DateTime
+  occurredAt DateTime @default(now())
+
+  @@index([source, occurredAt])
+  @@index([dedupeKey, lastSeenAt])
+}
+
+model DeviceRegistration {
+  id             String   @id @default(cuid())
+  deviceId       String   @unique
+  platform       String
+  expoPushToken  String?
+  timezone       String
+  appVersion     String?
+  alertsEnabled  Boolean  @default(true)
+  categoryPrefs  Json
+  quietHoursFrom String?
+  quietHoursTo   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model NotificationLog {
+  id             String   @id @default(cuid())
+  eventId        String
+  category       String
+  title          String
+  body           String
+  provider       String
+  success        Boolean
+  error          String?
+  payload        Json
+  recipientCount Int
+  sentAt         DateTime @default(now())
+
+  @@index([category, sentAt])
+  @@index([eventId, sentAt])
+}
+
+model AlertEvent {
+  id          String   @id @default(cuid())
+  category    String
+  type        String
+  source      String
+  dedupeKey   String
+  title       String
+  message     String
+  beforeValue String?
+  afterValue  String?
+  payload     Json
+  occurredAt  DateTime @default(now())
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+
+  @@index([category, occurredAt])
+  @@index([source, occurredAt])
+  @@index([dedupeKey, lastSeenAt])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

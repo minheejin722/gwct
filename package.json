@@ -1,0 +1,29 @@
+{
+  "name": "gwct-alert-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all -p dev:server mobile",
+    "dev:4001": "npm-run-all -p dev:server:4001 mobile:4001",
+    "dev:server": "npm --workspace @gwct/server run dev",
+    "dev:server:4001": "cross-env PORT=4001 npm --workspace @gwct/server run dev",
+    "mobile": "npm --workspace @gwct/mobile run start",
+    "mobile:4001": "cross-env EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4001 npm --workspace @gwct/mobile run start",
+    "test": "npm --workspaces run test --if-present",
+    "lint": "npm --workspaces run lint --if-present",
+    "typecheck": "npm --workspaces run typecheck --if-present",
+    "scrape:once": "npm --workspace @gwct/server run scrape:once",
+    "replay:fixtures": "npm --workspace @gwct/server run replay:fixtures"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "npm-run-all": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

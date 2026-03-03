@@ -1,0 +1,226 @@
+﻿import { z } from "zod";
+
+export const SourceIdSchema = z.enum([
+  "gwct_schedule_list",
+  "gwct_schedule_chart",
+  "gwct_work_status",
+  "gwct_gc_remaining",
+  "gwct_equipment_status",
+  "ys_forecast",
+  "ys_notice",
+]);
+export type SourceId = z.infer<typeof SourceIdSchema>;
+
+export const EventCategorySchema = z.enum([
+  "VESSEL",
+  "CRANE",
+  "EQUIPMENT",
+  "YT",
+  "WEATHER",
+]);
+export type EventCategory = z.infer<typeof EventCategorySchema>;
+
+export const VesselScheduleItemSchema = z.object({
+  source: SourceIdSchema,
+  vesselKey: z.string(),
+  vesselName: z.string(),
+  terminalVoyage: z.string().nullable(),
+  berth: z.string().nullable(),
+  shippingLine: z.string().nullable(),
+  route: z.string().nullable(),
+  eta: z.string().nullable(),
+  etb: z.string().nullable(),
+  ata: z.string().nullable(),
+  etd: z.string().nullable(),
+  atd: z.string().nullable(),
+  status: z.string().nullable(),
+  workStartAt: z.string().nullable(),
+  workEndAt: z.string().nullable(),
+  importCutoffAt: z.string().nullable(),
+  rawLabelMap: z.record(z.string()).default({}),
+  signature: z.string(),
+  seenAt: z.string(),
+});
+export type VesselScheduleItem = z.infer<typeof VesselScheduleItemSchema>;
+
+export const VesselScheduleChangeTypeSchema = z.enum([
+  "NEW_VESSEL",
+  "REMOVED_VESSEL",
+  "TIME_PULLED_FORWARD",
+  "TIME_DELAYED",
+  "BERTH_CHANGED",
+  "STATUS_CHANGED",
+  "FIELD_CHANGED",
+]);
+export type VesselScheduleChangeType = z.infer<typeof VesselScheduleChangeTypeSchema>;
+
+export const VesselScheduleChangeEventSchema = z.object({
+  id: z.string(),
+  vesselKey: z.string(),
+  changeType: VesselScheduleChangeTypeSchema,
+  fieldName: z.string().nullable(),
+  oldValue: z.string().nullable(),
+  newValue: z.string().nullable(),
+  occurredAt: z.string(),
+  dedupeKey: z.string(),
+});
+export type VesselScheduleChangeEvent = z.infer<typeof VesselScheduleChangeEventSchema>;
+
+export const CraneStatusSchema = z.object({
+  craneId: z.string(),
+  vesselName: z.string().nullable(),
+  dischargeDone: z.number().nullable(),
+  loadDone: z.number().nullable(),
+  dischargeRemaining: z.number().nullable(),
+  loadRemaining: z.number().nullable(),
+  totalRemaining: z.number().nullable(),
+  progressPercent: z.number().nullable(),
+  source: SourceIdSchema,
+  signature: z.string(),
+  seenAt: z.string(),
+});
+export type CraneStatus = z.infer<typeof CraneStatusSchema>;
+
+export const CraneThresholdRuleSchema = z.object({
+  craneId: z.string(),
+  threshold: z.number().int().nonnegative(),
+  enabled: z.boolean(),
+});
+export type CraneThresholdRule = z.infer<typeof CraneThresholdRuleSchema>;
+
+export const EquipmentLoginStatusSchema = z.object({
+  equipmentId: z.string(),
+  operatorName: z.string().nullable(),
+  helperName: z.string().nullable(),
+  loginText: z.string().nullable(),
+  stopReason: z.string().nullable(),
+  source: SourceIdSchema,
+  signature: z.string(),
+  seenAt: z.string(),
+});
+export type EquipmentLoginStatus = z.infer<typeof EquipmentLoginStatusSchema>;
+
+export const EquipmentLoginEventSchema = z.object({
+  id: z.string(),
+  equipmentId: z.string(),
+  eventType: z.string(),
+  oldOperator: z.string().nullable(),
+  newOperator: z.string().nullable(),
+  oldHelper: z.string().nullable(),
+  newHelper: z.string().nullable(),
+  occurredAt: z.string(),
+  dedupeKey: z.string(),
+});
+export type EquipmentLoginEvent = z.infer<typeof EquipmentLoginEventSchema>;
+
+export const YTCountSnapshotSchema = z.object({
+  totalLoggedIn: z.number().int().nonnegative(),
+  totalKnown: z.number().int().nonnegative(),
+  threshold: z.number().int().nonnegative().nullable(),
+  source: SourceIdSchema,
+  seenAt: z.string(),
+  signature: z.string(),
+});
+export type YTCountSnapshot = z.infer<typeof YTCountSnapshotSchema>;
+
+export const YTThresholdRuleSchema = z.object({
+  threshold: z.number().int().nonnegative(),
+  enabled: z.boolean(),
+});
+export type YTThresholdRule = z.infer<typeof YTThresholdRuleSchema>;
+
+export const WeatherNoticeSnapshotSchema = z.object({
+  source: SourceIdSchema,
+  dutyText: z.string().nullable(),
+  dispatchTeamDutyText: z.string().nullable(),
+  noticeHeadline: z.string().nullable(),
+  suspensionState: z.enum(["none", "partial", "all"]),
+  matchedKeywords: z.array(z.string()),
+  severity: z.enum(["normal", "warning", "critical"]),
+  signature: z.string(),
+  seenAt: z.string(),
+});
+export type WeatherNoticeSnapshot = z.infer<typeof WeatherNoticeSnapshotSchema>;
+
+export const WeatherAlertEventSchema = z.object({
+  id: z.string(),
+  alertKind: z.enum(["ALL_SUSPENDED", "PARTIAL_SUSPENDED", "RESUMED", "TEXT_CHANGED"]),
+  oldState: z.enum(["none", "partial", "all"]),
+  newState: z.enum(["none", "partial", "all"]),
+  oldText: z.string().nullable(),
+  newText: z.string().nullable(),
+  occurredAt: z.string(),
+  dedupeKey: z.string(),
+});
+export type WeatherAlertEvent = z.infer<typeof WeatherAlertEventSchema>;
+
+export const DeviceRegistrationSchema = z.object({
+  deviceId: z.string(),
+  platform: z.enum(["ios", "android", "web"]),
+  expoPushToken: z.string().nullable(),
+  timezone: z.string(),
+  appVersion: z.string().nullable(),
+  alertsEnabled: z.boolean().default(true),
+});
+export type DeviceRegistration = z.infer<typeof DeviceRegistrationSchema>;
+
+export const NotificationLogSchema = z.object({
+  id: z.string(),
+  eventId: z.string(),
+  category: EventCategorySchema,
+  title: z.string(),
+  body: z.string(),
+  sentAt: z.string(),
+  provider: z.string(),
+  success: z.boolean(),
+  error: z.string().nullable(),
+});
+export type NotificationLog = z.infer<typeof NotificationLogSchema>;
+
+export const ScrapeRunSchema = z.object({
+  id: z.string(),
+  source: SourceIdSchema,
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  success: z.boolean(),
+  statusCode: z.number().int().nullable(),
+  durationMs: z.number().int().nullable(),
+  htmlHash: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+export type ScrapeRun = z.infer<typeof ScrapeRunSchema>;
+
+export const ParseErrorSchema = z.object({
+  id: z.string(),
+  source: SourceIdSchema,
+  parserName: z.string(),
+  reason: z.string(),
+  diagnostics: z.record(z.any()).default({}),
+  happenedAt: z.string(),
+});
+export type ParseError = z.infer<typeof ParseErrorSchema>;
+
+export const AlertEventSchema = z.object({
+  id: z.string(),
+  category: EventCategorySchema,
+  type: z.string(),
+  dedupeKey: z.string(),
+  title: z.string(),
+  message: z.string(),
+  beforeValue: z.string().nullable(),
+  afterValue: z.string().nullable(),
+  payload: z.record(z.any()).default({}),
+  occurredAt: z.string(),
+});
+export type AlertEvent = z.infer<typeof AlertEventSchema>;
+
+export const DashboardSummarySchema = z.object({
+  lastUpdatedAt: z.string().nullable(),
+  vesselCount: z.number().int().nonnegative(),
+  craneCount: z.number().int().nonnegative(),
+  equipmentActiveCount: z.number().int().nonnegative(),
+  ytLoggedInCount: z.number().int().nonnegative(),
+  weatherState: z.enum(["none", "partial", "all"]),
+  alertCount24h: z.number().int().nonnegative(),
+});
+export type DashboardSummary = z.infer<typeof DashboardSummarySchema>;
