@@ -1,14 +1,67 @@
 ﻿import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 
+const EVENT_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+const seenAlertEvents = new Map<string, number>();
+
+function pruneSeenAlertEvents(now: number): void {
+  for (const [eventId, seenAt] of seenAlertEvents.entries()) {
+    if (now - seenAt > EVENT_DEDUPE_WINDOW_MS) {
+      seenAlertEvents.delete(eventId);
+    }
+  }
+}
+
+function extractEventId(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const maybeEventId = (value as Record<string, unknown>).eventId;
+  if (typeof maybeEventId !== "string") {
+    return null;
+  }
+  const trimmed = maybeEventId.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+export function rememberAlertEvent(eventId: string): boolean {
+  const now = Date.now();
+  pruneSeenAlertEvents(now);
+
+  const normalized = eventId.trim();
+  if (!normalized.length) {
+    return true;
+  }
+
+  if (seenAlertEvents.has(normalized)) {
+    return false;
+  }
+
+  seenAlertEvents.set(normalized, now);
+  return true;
+}
+
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const eventId = extractEventId(notification.request.content.data);
+    if (eventId && !rememberAlertEvent(eventId)) {
+      return {
+        shouldShowAlert: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+        shouldShowBanner: false,
+        shouldShowList: false,
+      };
+    }
+
+    return {
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    };
+  },
 });
 
 function isPermissionGranted(permission: Notifications.NotificationPermissionsStatus): boolean {

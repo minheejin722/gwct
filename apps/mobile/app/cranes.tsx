@@ -1,20 +1,22 @@
-﻿import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+﻿import { useEffect } from "react";
+import type { CraneStatus } from "@gwct/shared";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { API_URLS } from "../lib/config";
+import { buildCraneRenderKey, reportDuplicateCraneRows } from "../lib/craneKeys";
 
 interface CranesResponse {
   count: number;
-  items: Array<{
-    craneId: string;
-    vesselName: string | null;
-    totalRemaining: number | null;
-    dischargeRemaining: number | null;
-    loadRemaining: number | null;
-  }>;
+  items: CraneStatus[];
 }
 
 export default function CranesScreen() {
   const { data, loading, refresh } = useEndpoint<CranesResponse>(API_URLS.cranes);
+  const items = data?.items || [];
+
+  useEffect(() => {
+    reportDuplicateCraneRows(items);
+  }, [items]);
 
   return (
     <ScrollView
@@ -22,8 +24,8 @@ export default function CranesScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
     >
-      {(data?.items || []).map((item) => (
-        <View key={item.craneId} style={styles.card}>
+      {items.map((item) => (
+        <View key={buildCraneRenderKey(item)} style={styles.card}>
           <Text style={styles.title}>{item.craneId}</Text>
           <Text style={styles.meta}>선박: {item.vesselName || "-"}</Text>
           <Text style={styles.highlight}>잔량 합계: {item.totalRemaining ?? "-"}</Text>

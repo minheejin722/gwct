@@ -24,6 +24,7 @@ const EnvSchema = z.object({
   SCHEDULE_ALERT_ON_WINDOW_ENTER: z.string().default("false"),
   EXPO_PUSH_ENABLED: z.string().default("false"),
   EXPO_ACCESS_TOKEN: z.string().optional(),
+  IOS_CUSTOM_ALERT_SOUND: z.string().default("false"),
 });
 
 const parsed = EnvSchema.parse(process.env);
@@ -33,6 +34,7 @@ export const env = {
   playwrightHeadless: parsed.PLAYWRIGHT_HEADLESS !== "false",
   expoPushEnabled: parsed.EXPO_PUSH_ENABLED === "true",
   scheduleAlertOnWindowEnter: parsed.SCHEDULE_ALERT_ON_WINDOW_ENTER === "true",
+  iosCustomAlertSound: parsed.IOS_CUSTOM_ALERT_SOUND === "true",
   urls: {
     gwctH: "http://www.gwct.co.kr:8080/dashboard/?m=H&s=A",
     gwctI: "http://www.gwct.co.kr:8080/dashboard/?m=I&s=A",

@@ -14,3 +14,6 @@
 - On Windows PowerShell, avoid default `Set-Content` encoding for source files; always force UTF-8 (`-Encoding utf8` or explicit `UTF8Encoding`) to prevent TypeScript/source corruption.
 - For Expo monorepo runtime validation, do not rely on `expo-doctor` alone; verify with an actual Metro bundle (`expo export` or live bundle request) because Babel/transitive module gaps can still pass doctor checks.
 - In this repo, if iPhone red screen shows missing Babel modules from `expo-router/entry.js`, fix mobile Babel stack first (`@babel/core`, `babel-preset-expo`, required plugins) and confirm `expo export --platform ios` succeeds before retesting Expo Go.
+
+## 2026-03-04
+- In npm workspace monorepos where `@gwct/shared` exports TS source directly, NodeNext-style internal `.js` import suffixes can break Expo Metro resolution; keep Node entry intact and add a `react-native` conditional export to a native entry file that uses extensionless internal imports.

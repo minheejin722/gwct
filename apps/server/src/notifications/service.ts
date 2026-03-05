@@ -1,7 +1,14 @@
 ﻿import { EVENT_TO_DEEPLINK } from "@gwct/shared";
 import type { AlertEventInput, Repository } from "../db/repository.js";
 import type { SseHub } from "../lib/sse.js";
-import type { NotificationProvider } from "./provider.js";
+import type { NotificationProvider, NotificationRecipient } from "./provider.js";
+
+function normalizePlatform(value: string): NotificationRecipient["platform"] {
+  if (value === "ios" || value === "android") {
+    return value;
+  }
+  return "web";
+}
 
 export class NotificationService {
   constructor(
@@ -12,12 +19,16 @@ export class NotificationService {
 
   async dispatch(eventId: string, event: AlertEventInput): Promise<void> {
     const devices = await this.repo.listDevicesForCategory(event.category);
-    const tokens = devices
-      .map((device) => device.expoPushToken)
-      .filter((token): token is string => Boolean(token));
+    const recipients: NotificationRecipient[] = devices
+      .filter((device) => Boolean(device.expoPushToken))
+      .map((device) => ({
+        token: device.expoPushToken!,
+        platform: normalizePlatform(device.platform),
+      }));
 
     const deepLink = EVENT_TO_DEEPLINK[event.type] || "alerts";
     const payload = {
+      eventId,
       category: event.category,
       eventType: event.type,
       deepLink,
@@ -31,7 +42,7 @@ export class NotificationService {
       title: event.title,
       body: event.message,
       data: payload,
-      tokens,
+      recipients,
     });
 
     await this.repo.logNotification({
@@ -43,7 +54,7 @@ export class NotificationService {
       success: result.success,
       error: result.errors.join("; ") || null,
       payload,
-      recipientCount: tokens.length,
+      recipientCount: recipients.length,
     });
 
     this.sseHub.broadcast("alert", {

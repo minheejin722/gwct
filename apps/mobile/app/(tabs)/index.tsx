@@ -1,4 +1,5 @@
 ﻿import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { formatDashboardMetric } from "@gwct/shared";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { useSseAlerts } from "../../hooks/useSseAlerts";
 import { API_URLS } from "../../lib/config";
@@ -6,9 +7,9 @@ import { ScreenLinkCard } from "../../components/ScreenLinkCard";
 
 interface SummaryResponse {
   lastUpdatedAt: string | null;
-  vesselCount: number;
-  craneCount: number;
-  equipmentActiveCount: number;
+  trackedVesselCount: number;
+  workingCraneCount: number;
+  supportEquipmentLoginCount: number;
   ytLoggedInCount: number;
   weatherState: "none" | "partial" | "all";
   alertCount24h: number;
@@ -26,10 +27,12 @@ export default function HomeScreen() {
     >
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>GWCT 운영 요약</Text>
-        <Text style={styles.summaryText}>선박: {data?.vesselCount ?? 0}</Text>
-        <Text style={styles.summaryText}>크레인: {data?.craneCount ?? 0}</Text>
-        <Text style={styles.summaryText}>장비 로그인: {data?.equipmentActiveCount ?? 0}</Text>
-        <Text style={styles.summaryText}>YT 로그인: {data?.ytLoggedInCount ?? 0}</Text>
+        <Text style={styles.summaryText}>{formatDashboardMetric("선박(ETA 추적)", data?.trackedVesselCount ?? 0)}</Text>
+        <Text style={styles.summaryText}>{formatDashboardMetric("크레인(GC181~190 작업중)", data?.workingCraneCount ?? 0)}</Text>
+        <Text style={styles.summaryText}>
+          {formatDashboardMetric("장비 로그인(LEASE/REPAIR/RS/TC/TH)", data?.supportEquipmentLoginCount ?? 0)}
+        </Text>
+        <Text style={styles.summaryText}>{formatDashboardMetric("YT 로그인", data?.ytLoggedInCount ?? 0)}</Text>
         <Text style={styles.summaryText}>도선 상태: {data?.weatherState ?? "none"}</Text>
         <Text style={styles.meta}>마지막 갱신: {updatedAt || "-"}</Text>
       </View>
@@ -46,7 +49,7 @@ export default function HomeScreen() {
         <ScreenLinkCard href="/cranes" title="크레인 현황" subtitle="GC 잔량 및 임계치 추적" />
         <ScreenLinkCard href="/equipment" title="장비 현황" subtitle="GC180~190 기사/HK/중단사유 확인" />
         <ScreenLinkCard href="/yt" title="YT 로그인 수" subtitle="최소 인원 임계치 모니터링" />
-        <ScreenLinkCard href="/weather" title="도선 중지 알림" subtitle="배선팀근무 기반 중지 감지" />
+        <ScreenLinkCard href="/weather" title="도선 중지 알림" subtitle="배선팀근무 + 대기호출자 기반 중지 감지" />
       </View>
     </ScrollView>
   );

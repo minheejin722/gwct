@@ -1,12 +1,17 @@
 ﻿import type { EventCategory } from "@gwct/shared";
 
+export interface NotificationRecipient {
+  token: string;
+  platform: "ios" | "android" | "web";
+}
+
 export interface NotificationRequest {
   eventId: string;
   category: EventCategory;
   title: string;
   body: string;
   data: Record<string, unknown>;
-  tokens: string[];
+  recipients: NotificationRecipient[];
 }
 
 export interface NotificationResult {

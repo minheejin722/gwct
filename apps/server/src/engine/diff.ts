@@ -2,12 +2,16 @@
   CraneStatus,
   EquipmentLoginStatus,
   SourceId,
+  YTUnitTransitionKind,
+  YTUnitSnapshot,
   VesselScheduleItem,
   WeatherNoticeSnapshot,
   YTCountSnapshot,
 } from "@gwct/shared";
+import { summarizeGwctEtaChange } from "@gwct/shared";
 import type { AlertEventInput } from "../db/repository.js";
 import { compareIso, formatKst, parseSeoulDate } from "../lib/time.js";
+import { buildYtUnitSnapshotFromEquipment } from "../services/equipment/ytUnits.js";
 import type {
   EquipmentYtMonitorConfig,
   GcRemainingMonitorRule,
@@ -262,33 +266,6 @@ export function detectGwctEtaChangedEvents(
     const previous = prevMap.get(currItem.vesselKey);
 
     if (!previous) {
-      if (options.emitOnWindowEntry && currEta) {
-        events.push(
-          createEvent({
-            category: "VESSEL",
-            type: "gwct_eta_changed",
-            source,
-            dedupeKey: `gwct:eta:${voyage}:${currEta}`,
-            title: `ETA 변경 (${voyage})`,
-            message: `${currItem.vesselName} ETA ${currEta}`,
-            beforeValue: null,
-            afterValue: currEta,
-            payload: {
-              type: "gwct_eta_changed",
-              voyage,
-              vesselKey: currItem.vesselKey,
-              vesselName: currItem.vesselName,
-              etaBefore: null,
-              etaAfter: currEta,
-              indexInWatchWindow: currentIndex,
-              trackingCount: limit,
-              sourceUrl: options.sourceUrl,
-              capturedAt: occurredAt,
-            },
-            occurredAt,
-          }),
-        );
-      }
       continue;
     }
 
@@ -296,7 +273,12 @@ export function detectGwctEtaChangedEvents(
     if (prevEta === currEta) {
       continue;
     }
-    if (!prevEta && !currEta) {
+    if (!prevEta || !currEta) {
+      continue;
+    }
+
+    const etaChange = summarizeGwctEtaChange(prevEta, currEta);
+    if (!etaChange) {
       continue;
     }
 
@@ -305,18 +287,22 @@ export function detectGwctEtaChangedEvents(
         category: "VESSEL",
         type: "gwct_eta_changed",
         source,
-        dedupeKey: `gwct:eta:${voyage}:${currEta || "none"}`,
+        dedupeKey: `gwct:eta:${voyage}:${etaChange.currentEta}`,
         title: `ETA 변경 (${voyage})`,
-        message: `${currItem.vesselName} ETA ${prevEta || "-"} -> ${currEta || "-"}`,
-        beforeValue: prevEta,
-        afterValue: currEta,
+        message: `${currItem.vesselName} ${etaChange.humanMessage}`,
+        beforeValue: etaChange.previousEta,
+        afterValue: etaChange.currentEta,
         payload: {
           type: "gwct_eta_changed",
           voyage,
           vesselKey: currItem.vesselKey,
           vesselName: currItem.vesselName,
-          etaBefore: prevEta,
-          etaAfter: currEta,
+          previousEta: etaChange.previousEta,
+          currentEta: etaChange.currentEta,
+          deltaMinutes: etaChange.deltaMinutes,
+          direction: etaChange.direction,
+          crossedDate: etaChange.crossedDate,
+          humanMessage: etaChange.humanMessage,
           indexInWatchWindow: currentIndex,
           trackingCount: limit,
           sourceUrl: options.sourceUrl,
@@ -789,6 +775,7 @@ export function detectGcEquipmentFocusEvents(
 
 interface YtCountEventOptions {
   sourceUrl: string;
+  previousCount?: number | null;
 }
 
 interface YtCountEventResult {
@@ -814,7 +801,9 @@ export function detectYtCountStateEvents(
     return emptyState;
   }
 
-  const inferredState: YtMonitorState = curr.totalLoggedIn <= config.threshold ? "LOW" : "NORMAL";
+  const previousCount = options.previousCount ?? null;
+  const currentCount = curr.totalLoggedIn;
+  const inferredState: YtMonitorState = currentCount < config.threshold ? "LOW" : "NORMAL";
 
   if (!config.enabled) {
     return {
@@ -824,7 +813,15 @@ export function detectYtCountStateEvents(
     };
   }
 
-  if (!config.stateInitialized || !config.state) {
+  if (!config.stateInitialized || !config.state || previousCount === null) {
+    return {
+      events: [],
+      nextState: inferredState,
+      initialized: true,
+    };
+  }
+
+  if (previousCount === currentCount) {
     return {
       events: [],
       nextState: inferredState,
@@ -833,23 +830,24 @@ export function detectYtCountStateEvents(
   }
 
   const events: AlertEventInput[] = [];
-  let nextState = config.state;
+  let nextState: YtMonitorState = inferredState;
 
-  if (config.state === "NORMAL" && curr.totalLoggedIn <= config.threshold) {
+  if (previousCount >= config.threshold && currentCount < config.threshold) {
     nextState = "LOW";
     events.push(
       createEvent({
         category: "YT",
         type: "yt_count_low",
         source,
-        dedupeKey: `yt:count:low:${occurredAt}`,
+        dedupeKey: `yt:count:low:${config.threshold}:${currentCount}`,
         title: "YT 로그인 대수 임계치 하회",
-        message: `YT 로그인 ${curr.totalLoggedIn}대 (기준값 ${config.threshold})`,
-        beforeValue: String(config.threshold + 1),
-        afterValue: String(curr.totalLoggedIn),
+        message: `YT 로그인 ${previousCount}대 -> ${currentCount}대 (기준값 ${config.threshold})`,
+        beforeValue: String(previousCount),
+        afterValue: String(currentCount),
         payload: {
           type: "yt_count_low",
-          ytCount: curr.totalLoggedIn,
+          ytCount: currentCount,
+          previousCount,
           threshold: config.threshold,
           capturedAt: occurredAt,
           sourceUrl: options.sourceUrl,
@@ -857,21 +855,45 @@ export function detectYtCountStateEvents(
         occurredAt,
       }),
     );
-  } else if (config.state === "LOW" && curr.totalLoggedIn >= config.threshold) {
+  } else if (previousCount < config.threshold && currentCount < config.threshold && currentCount < previousCount) {
+    nextState = "LOW";
+    events.push(
+      createEvent({
+        category: "YT",
+        type: "yt_count_low",
+        source,
+        dedupeKey: `yt:count:low:${config.threshold}:${currentCount}`,
+        title: "YT 로그인 대수 추가 하락",
+        message: `YT 로그인 ${previousCount}대 -> ${currentCount}대 (기준값 ${config.threshold})`,
+        beforeValue: String(previousCount),
+        afterValue: String(currentCount),
+        payload: {
+          type: "yt_count_low",
+          ytCount: currentCount,
+          previousCount,
+          threshold: config.threshold,
+          capturedAt: occurredAt,
+          sourceUrl: options.sourceUrl,
+        },
+        occurredAt,
+      }),
+    );
+  } else if (previousCount < config.threshold && currentCount >= config.threshold) {
     nextState = "NORMAL";
     events.push(
       createEvent({
         category: "YT",
         type: "yt_count_recovered",
         source,
-        dedupeKey: `yt:count:recovered:${occurredAt}`,
+        dedupeKey: `yt:count:recovered:${config.threshold}:${currentCount}`,
         title: "YT 로그인 대수 회복",
-        message: `YT 로그인 ${curr.totalLoggedIn}대 (기준값 ${config.threshold})`,
-        beforeValue: String(Math.max(0, config.threshold - 1)),
-        afterValue: String(curr.totalLoggedIn),
+        message: `YT 로그인 ${previousCount}대 -> ${currentCount}대 (기준값 ${config.threshold})`,
+        beforeValue: String(previousCount),
+        afterValue: String(currentCount),
         payload: {
           type: "yt_count_recovered",
-          ytCount: curr.totalLoggedIn,
+          ytCount: currentCount,
+          previousCount,
           threshold: config.threshold,
           capturedAt: occurredAt,
           sourceUrl: options.sourceUrl,
@@ -886,6 +908,161 @@ export function detectYtCountStateEvents(
     nextState,
     initialized: true,
   };
+}
+
+interface YtUnitEventOptions {
+  sourceUrl: string;
+}
+
+function compareYtNo(a: string, b: string): number {
+  const aNo = Number(a.replace(/^\D+/, ""));
+  const bNo = Number(b.replace(/^\D+/, ""));
+  if (Number.isFinite(aNo) && Number.isFinite(bNo) && aNo !== bNo) {
+    return aNo - bNo;
+  }
+  return a.localeCompare(b);
+}
+
+function normalizeStateReason(value: string | null | undefined): string | null {
+  return normalizeOptionalValue(value);
+}
+
+function createSyntheticLoggedOutSnapshot(previous: YTUnitSnapshot): YTUnitSnapshot {
+  return {
+    ytNo: previous.ytNo,
+    driverName: null,
+    loginTime: null,
+    hkName: previous.hkName,
+    stopReason: previous.stopReason,
+    semanticState: "logged_out",
+    fingerprint: `synthetic_logged_out:${previous.ytNo}:${previous.fingerprint}`,
+  };
+}
+
+function buildYtUnitAlert(
+  input: {
+    source: SourceId;
+    occurredAt: string;
+    sourceUrl: string;
+    transitionKind: YTUnitTransitionKind;
+    before: YTUnitSnapshot;
+    after: YTUnitSnapshot;
+    message: string;
+  },
+): AlertEventInput {
+  const previousReason = normalizeStateReason(input.before.stopReason);
+  const currentReason = normalizeStateReason(input.after.stopReason);
+  const driverName = input.after.driverName || input.before.driverName || null;
+  const loginTime = input.after.loginTime || input.before.loginTime || null;
+
+  return createEvent({
+    category: "YT",
+    type: "yt_unit_status_changed",
+    source: input.source,
+    dedupeKey: `yt:unit:${input.after.ytNo}:${input.transitionKind}:${input.after.fingerprint}`,
+    title: `YT 상태 변화 (${input.after.ytNo})`,
+    message: input.message,
+    beforeValue: input.before.semanticState,
+    afterValue: input.after.semanticState,
+    payload: {
+      type: "yt_unit_status_changed",
+      transitionKind: input.transitionKind,
+      ytNo: input.after.ytNo,
+      driverName,
+      previousState: input.before.semanticState,
+      currentState: input.after.semanticState,
+      previousReason,
+      currentReason,
+      loginTime,
+      message: input.message,
+      previousFingerprint: input.before.fingerprint,
+      currentFingerprint: input.after.fingerprint,
+      capturedAt: input.occurredAt,
+      sourceUrl: input.sourceUrl,
+    },
+    occurredAt: input.occurredAt,
+  });
+}
+
+function formatYtLabel(ytNo: string, driverName: string | null): string {
+  if (driverName) {
+    return `${ytNo} ${driverName}`;
+  }
+  return ytNo;
+}
+
+export function detectYtUnitStatusEvents(
+  prev: EquipmentLoginStatus[],
+  curr: EquipmentLoginStatus[],
+  source: SourceId,
+  occurredAt: string,
+  options: YtUnitEventOptions,
+): AlertEventInput[] {
+  const prevUnits = buildYtUnitSnapshotFromEquipment(prev);
+  const currUnits = buildYtUnitSnapshotFromEquipment(curr);
+  const prevMap = byKey(prevUnits, (item) => item.ytNo);
+  const currMap = byKey(currUnits, (item) => item.ytNo);
+  const ytNos = Array.from(new Set([...prevMap.keys(), ...currMap.keys()])).sort(compareYtNo);
+  const events: AlertEventInput[] = [];
+
+  for (const ytNo of ytNos) {
+    const before = prevMap.get(ytNo);
+    const afterExisting = currMap.get(ytNo);
+
+    if (!before) {
+      continue;
+    }
+
+    const after = afterExisting || createSyntheticLoggedOutSnapshot(before);
+    if (before.fingerprint === after.fingerprint) {
+      continue;
+    }
+
+    let transitionKind: YTUnitTransitionKind | null = null;
+    let message: string | null = null;
+    const label = formatYtLabel(ytNo, after.driverName || before.driverName);
+    const previousReason = normalizeStateReason(before.stopReason);
+    const currentReason = normalizeStateReason(after.stopReason);
+
+    if (before.semanticState === "active" && after.semanticState === "stopped") {
+      transitionKind = "active_to_stopped";
+      message = `${label} 중단: ${currentReason || "-"}`;
+    } else if (before.semanticState === "active" && after.semanticState === "logged_out") {
+      transitionKind = "active_to_logged_out";
+      message = `${label} 로그아웃`;
+    } else if (before.semanticState === "stopped" && after.semanticState === "active") {
+      transitionKind = "stopped_to_active";
+      message = `${label} 중단 해제`;
+    } else if (before.semanticState === "logged_out" && after.semanticState === "active") {
+      transitionKind = "logged_out_to_active";
+      message = `${label} 다시 로그인`;
+    } else if (
+      before.semanticState === "stopped" &&
+      after.semanticState === "stopped" &&
+      previousReason !== currentReason
+    ) {
+      transitionKind = "stopped_reason_changed";
+      message = `${label} 중단 사유 변경: ${previousReason || "-"} -> ${currentReason || "-"}`;
+    }
+
+    if (!transitionKind || !message) {
+      continue;
+    }
+
+    events.push(
+      buildYtUnitAlert({
+        source,
+        occurredAt,
+        sourceUrl: options.sourceUrl,
+        transitionKind,
+        before,
+        after,
+        message,
+      }),
+    );
+  }
+
+  return events;
 }
 
 export function diffYtThreshold(
@@ -945,122 +1122,91 @@ export function diffWeather(
     return [];
   }
 
-  const prevState = prev?.suspensionState ?? "none";
-  const currState = curr.suspensionState;
-  const prevText = prev?.dispatchTeamDutyText || prev?.noticeHeadline || prev?.dutyText || null;
-  const currText = curr.dispatchTeamDutyText || curr.noticeHeadline || curr.dutyText || null;
+  type WeatherSemantic = "NORMAL" | "SUSPENDED" | "UNKNOWN";
+  type EffectiveWeatherSemantic = Exclude<WeatherSemantic, "UNKNOWN">;
 
-  if (prevState === currState && prevText === currText) {
+  const toSemantic = (snapshot: WeatherNoticeSnapshot | null): WeatherSemantic => {
+    if (!snapshot) {
+      return "NORMAL";
+    }
+    if (
+      snapshot.semanticState === "NORMAL" ||
+      snapshot.semanticState === "SUSPENDED" ||
+      snapshot.semanticState === "UNKNOWN"
+    ) {
+      return snapshot.semanticState;
+    }
+    return snapshot.suspensionState === "none" ? "NORMAL" : "SUSPENDED";
+  };
+
+  const toLegacyState = (semantic: EffectiveWeatherSemantic): "none" | "all" => {
+    return semantic === "SUSPENDED" ? "all" : "none";
+  };
+
+  const textFromSnapshot = (snapshot: WeatherNoticeSnapshot | null): string | null => {
+    if (!snapshot) {
+      return null;
+    }
+    return snapshot.dispatchTeamDutyText || snapshot.standbyCallText || snapshot.noticeHeadline || snapshot.dutyText || null;
+  };
+
+  const prevSemanticRaw = toSemantic(prev);
+  const prevSemantic: EffectiveWeatherSemantic = prevSemanticRaw === "UNKNOWN" ? "NORMAL" : prevSemanticRaw;
+  const currSemanticRaw = toSemantic(curr);
+  const currSemantic: EffectiveWeatherSemantic = currSemanticRaw === "UNKNOWN" ? prevSemantic : currSemanticRaw;
+  const prevState = toLegacyState(prevSemantic);
+  const currState = toLegacyState(currSemantic);
+  const prevText = textFromSnapshot(prev);
+  const currText = textFromSnapshot(curr);
+  const debugPayload = {
+    oldState: prevState,
+    newState: currState,
+    oldSemanticState: prevSemantic,
+    newSemanticState: currSemantic,
+    dispatchTeamText: curr.dispatchTeamDutyText || null,
+    standbyCallText: curr.standbyCallText || curr.dutyText || null,
+    matchedKeywords: curr.matchedKeywords || [],
+    normalizedReason: curr.normalizedReason || null,
+    keywords: curr.matchedKeywords || [],
+  };
+
+  if (prevSemantic === currSemantic) {
     return [];
   }
 
-  const events: AlertEventInput[] = [];
-
-  if (prevState === "none" && currState === "all") {
-    events.push(
+  if (prevSemantic === "NORMAL" && currSemantic === "SUSPENDED") {
+    return [
       createEvent({
         category: "WEATHER",
         type: "ALL_SUSPENDED",
         source,
         dedupeKey: "weather:all_suspended",
         title: "전체 도선 중단",
-        message: currText || "All Pilotage Suspended",
+        message: curr.normalizedReason || currText || "All Pilotage Suspended",
         beforeValue: prevText,
         afterValue: currText,
-        payload: {
-          oldState: prevState,
-          newState: currState,
-          keywords: curr.matchedKeywords,
-        },
+        payload: debugPayload,
         occurredAt,
       }),
-    );
-    return events;
+    ];
   }
 
-  if (prevState === "none" && currState === "partial") {
-    events.push(
-      createEvent({
-        category: "WEATHER",
-        type: "PARTIAL_SUSPENDED",
-        source,
-        dedupeKey: "weather:partial_suspended",
-        title: "도선 일부 중단/통제",
-        message: currText || "Pilotage Suspended",
-        beforeValue: prevText,
-        afterValue: currText,
-        payload: {
-          oldState: prevState,
-          newState: currState,
-          keywords: curr.matchedKeywords,
-        },
-        occurredAt,
-      }),
-    );
-    return events;
-  }
-
-  if ((prevState === "all" || prevState === "partial") && currState === "none") {
-    events.push(
+  if (prevSemantic === "SUSPENDED" && currSemantic === "NORMAL") {
+    return [
       createEvent({
         category: "WEATHER",
         type: "RESUMED",
         source,
         dedupeKey: "weather:resumed",
         title: "도선 재개",
-        message: "도선 중단 상태가 해제되었습니다.",
+        message: curr.normalizedReason || currText || "도선 중단 상태가 해제되었습니다.",
         beforeValue: prevText,
         afterValue: currText,
-        payload: {
-          oldState: prevState,
-          newState: currState,
-        },
+        payload: debugPayload,
         occurredAt,
       }),
-    );
-    return events;
+    ];
   }
 
-  if (prevState === currState && prevText !== currText) {
-    events.push(
-      createEvent({
-        category: "WEATHER",
-        type: "TEXT_CHANGED",
-        source,
-        dedupeKey: `weather:text:${currState}:${currText || "none"}`,
-        title: "도선 공지 문구 변경",
-        message: currText || "weather message changed",
-        beforeValue: prevText,
-        afterValue: currText,
-        payload: {
-          oldState: prevState,
-          newState: currState,
-        },
-        occurredAt,
-      }),
-    );
-    return events;
-  }
-
-  if (prevState !== currState && currState === "all") {
-    events.push(
-      createEvent({
-        category: "WEATHER",
-        type: "ALL_SUSPENDED",
-        source,
-        dedupeKey: "weather:all_suspended",
-        title: "전체 도선 중단",
-        message: currText || "All Pilotage Suspended",
-        beforeValue: prevText,
-        afterValue: currText,
-        payload: {
-          oldState: prevState,
-          newState: currState,
-        },
-        occurredAt,
-      }),
-    );
-  }
-
-  return events;
+  return [];
 }

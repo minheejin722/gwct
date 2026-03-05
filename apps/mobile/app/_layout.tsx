@@ -5,6 +5,7 @@ import { Platform } from "react-native";
 import EventSource from "react-native-sse";
 import { API_URLS } from "../lib/config";
 import { getExpoPushTokenSafe, localDeviceId } from "../lib/push";
+import { resolveNotificationSound } from "../lib/notificationSound";
 
 interface LiveAlertMessage {
   eventId: string;
@@ -57,14 +58,35 @@ export default function RootLayout() {
           return;
         }
         lastSeenEventIdRef.current = parsed.eventId;
-        void Notifications.scheduleNotificationAsync({
-          content: {
-            title: parsed.title || "GWCT Alert",
-            body: parsed.message || "",
-            sound: true,
-          },
-          trigger: null,
-        });
+        const preferredSound = resolveNotificationSound();
+        const schedule = async () => {
+          try {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: parsed.title || "GWCT Alert",
+                body: parsed.message || "",
+                sound: preferredSound,
+                data: {
+                  eventId: parsed.eventId,
+                },
+              },
+              trigger: null,
+            });
+          } catch {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: parsed.title || "GWCT Alert",
+                body: parsed.message || "",
+                sound: "default",
+                data: {
+                  eventId: parsed.eventId,
+                },
+              },
+              trigger: null,
+            });
+          }
+        };
+        void schedule();
       } catch {
         // Ignore malformed payloads during hot-reload or server restart.
       }

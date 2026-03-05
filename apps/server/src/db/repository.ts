@@ -23,6 +23,14 @@ export interface AlertEventInput {
   occurredAt: string;
 }
 
+export interface EventHistoryClearResult {
+  alertEvents: number;
+  vesselScheduleChangeEvents: number;
+  equipmentLoginEvents: number;
+  weatherAlertEvents: number;
+  notificationLogs: number;
+}
+
 export class Repository {
   async startScrapeRun(source: SourceId, url: string, mode: "live" | "fixture") {
     return prisma.scrapeRun.create({
@@ -320,7 +328,7 @@ export class Repository {
     await prisma.weatherNoticeSnapshot.create({
       data: {
         source: snapshot.source,
-        dutyText: snapshot.dutyText,
+        dutyText: snapshot.standbyCallText ?? snapshot.dutyText,
         dispatchTeamDutyText: snapshot.dispatchTeamDutyText,
         noticeHeadline: snapshot.noticeHeadline,
         suspensionState: snapshot.suspensionState,
@@ -346,9 +354,12 @@ export class Repository {
       source: row.source as SourceId,
       dutyText: row.dutyText,
       dispatchTeamDutyText: row.dispatchTeamDutyText,
+      standbyCallText: row.dutyText,
       noticeHeadline: row.noticeHeadline,
       suspensionState: row.suspensionState as "none" | "partial" | "all",
+      semanticState: row.suspensionState === "none" ? "NORMAL" : "SUSPENDED",
       matchedKeywords: (row.matchedKeywords as string[]) || [],
+      normalizedReason: null,
       severity: row.severity as "normal" | "warning" | "critical",
       signature: row.signature,
       seenAt: row.seenAt.toISOString(),
@@ -499,6 +510,30 @@ export class Repository {
     });
   }
 
+  async clearEventHistory(): Promise<EventHistoryClearResult> {
+    const [
+      alertEvents,
+      vesselScheduleChangeEvents,
+      equipmentLoginEvents,
+      weatherAlertEvents,
+      notificationLogs,
+    ] = await prisma.$transaction([
+      prisma.alertEvent.deleteMany({}),
+      prisma.vesselScheduleChangeEvent.deleteMany({}),
+      prisma.equipmentLoginEvent.deleteMany({}),
+      prisma.weatherAlertEvent.deleteMany({}),
+      prisma.notificationLog.deleteMany({}),
+    ]);
+
+    return {
+      alertEvents: alertEvents.count,
+      vesselScheduleChangeEvents: vesselScheduleChangeEvents.count,
+      equipmentLoginEvents: equipmentLoginEvents.count,
+      weatherAlertEvents: weatherAlertEvents.count,
+      notificationLogs: notificationLogs.count,
+    };
+  }
+
   async registerDevice(input: DeviceRegistration) {
     return prisma.deviceRegistration.upsert({
       where: { deviceId: input.deviceId },
@@ -626,6 +661,18 @@ export class Repository {
       equipmentActiveCount: equip,
       ytLoggedInCount: yt?.totalLoggedIn ?? 0,
       weatherState: (weather?.suspensionState as "none" | "partial" | "all") ?? "none",
+      alertCount24h: alertCount,
+    };
+  }
+
+  async getDashboardMeta() {
+    const [latestAlert, alertCount] = await Promise.all([
+      prisma.alertEvent.findFirst({ orderBy: { occurredAt: "desc" }, select: { occurredAt: true } }),
+      prisma.alertEvent.count({ where: { occurredAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } }),
+    ]);
+
+    return {
+      lastUpdatedAt: latestAlert?.occurredAt.toISOString() ?? null,
       alertCount24h: alertCount,
     };
   }

@@ -6,7 +6,10 @@ import { ScreenLinkCard } from "../components/ScreenLinkCard";
 interface WeatherResponse {
   forecast: {
     suspensionState: "none" | "partial" | "all";
+    semanticState: "NORMAL" | "SUSPENDED" | "UNKNOWN";
     dispatchTeamDutyText: string | null;
+    standbyCallText: string | null;
+    normalizedReason: string | null;
     dutyText: string | null;
     seenAt: string;
   } | null;
@@ -22,7 +25,7 @@ interface WeatherResponse {
 
 export default function WeatherScreen() {
   const { data, loading, refresh } = useEndpoint<WeatherResponse>(API_URLS.weather);
-  const state = data?.forecast?.suspensionState || "none";
+  const semantic = data?.forecast?.semanticState || "UNKNOWN";
 
   return (
     <ScrollView
@@ -31,12 +34,18 @@ export default function WeatherScreen() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>배선팀근무 상태</Text>
-        <Text style={[styles.state, state === "all" ? styles.critical : state === "partial" ? styles.warning : styles.normal]}>
-          {state.toUpperCase()}
+        <Text style={styles.title}>도선 상태 (배선팀근무 + 대기호출자)</Text>
+        <Text
+          style={[
+            styles.state,
+            semantic === "SUSPENDED" ? styles.critical : semantic === "UNKNOWN" ? styles.warning : styles.normal,
+          ]}
+        >
+          {semantic}
         </Text>
-        <Text style={styles.text}>{data?.forecast?.dispatchTeamDutyText || "-"}</Text>
-        <Text style={styles.meta}>근무자: {data?.forecast?.dutyText || "-"}</Text>
+        <Text style={styles.meta}>배선팀근무: {data?.forecast?.dispatchTeamDutyText || "-"}</Text>
+        <Text style={styles.meta}>대기호출자: {data?.forecast?.standbyCallText || data?.forecast?.dutyText || "-"}</Text>
+        <Text style={styles.text}>판정 근거: {data?.forecast?.normalizedReason || "-"}</Text>
         <Text style={styles.meta}>감시설정: {data?.monitor?.enabled ? "ON" : "OFF"}</Text>
       </View>
 

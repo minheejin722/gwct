@@ -1,5 +1,5 @@
 ﻿import { z } from "zod";
-import { EventCategorySchema } from "../schemas/domain.js";
+import { EventCategorySchema } from "../schemas/domain";
 
 export const DeepLinkTargetSchema = z.enum([
   "home",
@@ -53,5 +53,5 @@ export const EVENT_TO_DEEPLINK: Record<string, DeepLinkTarget> = {
   TEXT_CHANGED: "weather",
 };
 
-export * from "./eta.js";
-export * from "./dashboard.js";
+export * from "./eta";
+export * from "./dashboard";

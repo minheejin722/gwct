@@ -12,6 +12,12 @@ import type { SseHub } from "../lib/sse.js";
 import { env } from "../config/env.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
 import { loadGcLatestSnapshot } from "../services/gc/latestStore.js";
+import { normalizeCraneLiveRows } from "../services/gc/liveRows.js";
+import {
+  countSupportEquipmentLogins,
+  countTrackedVessels,
+  countWorkingGcCranes,
+} from "../services/dashboard/summary.js";
 import { loadEquipmentLatestSnapshot } from "../services/equipment/latestStore.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
@@ -139,20 +145,92 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/health", async () => ({ ok: true, time: new Date().toISOString() }));
 
   app.get("/api/dashboard/summary", async () => {
-    return deps.repo.getDashboardSummary();
+    const [settings, scheduleLatest, gcLatest, equipmentRows, ytSnapshot, weather, meta] = await Promise.all([
+      loadMonitorSettings(),
+      loadScheduleFocusSnapshot(),
+      loadGcLatestSnapshot(),
+      deps.repo.getLatestEquipmentStatuses("gwct_equipment_status"),
+      deps.repo.getLatestYtSnapshot("gwct_equipment_status"),
+      deps.repo.getLatestWeatherSnapshot("ys_forecast"),
+      deps.repo.getDashboardMeta(),
+    ]);
+
+    return {
+      lastUpdatedAt: meta.lastUpdatedAt,
+      trackedVesselCount: countTrackedVessels(settings.gwctEtaMonitor.trackingCount, scheduleLatest),
+      workingCraneCount: countWorkingGcCranes(gcLatest),
+      supportEquipmentLoginCount: countSupportEquipmentLogins(equipmentRows),
+      ytLoggedInCount: ytSnapshot?.totalLoggedIn ?? 0,
+      weatherState: weather?.suspensionState ?? "none",
+      alertCount24h: meta.alertCount24h,
+    };
   });
 
   app.get("/api/vessels/live", async () => {
-    const rows = await deps.repo.getLatestVesselItems("gwct_schedule_list");
+    const [rows, alerts] = await Promise.all([
+      deps.repo.getLatestVesselItems("gwct_schedule_list"),
+      deps.repo.getRecentAlerts(500),
+    ]);
+
+    const latestEtaChangeByVessel = new Map<
+      string,
+      {
+        eventId: string;
+        occurredAt: string;
+        previousEta: string;
+        currentEta: string;
+        deltaMinutes: number;
+        direction: "earlier" | "later";
+        crossedDate: boolean;
+        humanMessage: string;
+      }
+    >();
+
+    for (const alert of alerts) {
+      if (alert.type !== "gwct_eta_changed") {
+        continue;
+      }
+      const payload = (alert.payload || {}) as Record<string, unknown>;
+      const vesselKey = typeof payload.vesselKey === "string" ? payload.vesselKey : null;
+      if (!vesselKey || latestEtaChangeByVessel.has(vesselKey)) {
+        continue;
+      }
+
+      const previousEta = typeof payload.previousEta === "string" ? payload.previousEta : null;
+      const currentEta = typeof payload.currentEta === "string" ? payload.currentEta : null;
+      const deltaMinutes = typeof payload.deltaMinutes === "number" ? payload.deltaMinutes : null;
+      const direction =
+        payload.direction === "earlier" || payload.direction === "later" ? payload.direction : null;
+      const crossedDate = typeof payload.crossedDate === "boolean" ? payload.crossedDate : false;
+      const humanMessage = typeof payload.humanMessage === "string" ? payload.humanMessage : null;
+      if (!previousEta || !currentEta || deltaMinutes === null || !direction || !humanMessage) {
+        continue;
+      }
+
+      latestEtaChangeByVessel.set(vesselKey, {
+        eventId: alert.id,
+        occurredAt: alert.occurredAt.toISOString(),
+        previousEta,
+        currentEta,
+        deltaMinutes,
+        direction,
+        crossedDate,
+        humanMessage,
+      });
+    }
+
     return {
       source: "gwct_schedule_list",
       count: rows.length,
-      items: rows,
+      items: rows.map((row) => ({
+        ...row,
+        latestEtaChange: latestEtaChangeByVessel.get(row.vesselKey) || null,
+      })),
     };
   });
 
   app.get("/api/cranes/live", async () => {
-    const rows = await deps.repo.getLatestCraneStatuses("gwct_work_status");
+    const rows = normalizeCraneLiveRows(await deps.repo.getLatestCraneStatuses("gwct_work_status"));
     return {
       source: "gwct_work_status",
       count: rows.length,
@@ -209,11 +287,18 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/yt/live", async () => {
-    const snapshot = await deps.repo.getLatestYtSnapshot("gwct_equipment_status");
-    const settings = await loadMonitorSettings();
+    const [snapshot, settings, latest] = await Promise.all([
+      deps.repo.getLatestYtSnapshot("gwct_equipment_status"),
+      loadMonitorSettings(),
+      loadEquipmentLatestSnapshot(),
+    ]);
     return {
       source: "gwct_equipment_status",
       snapshot,
+      ytCount: latest?.ytCount ?? snapshot?.totalLoggedIn ?? 0,
+      ytKnown: latest?.ytKnown ?? snapshot?.totalKnown ?? 0,
+      units: latest?.ytUnits || [],
+      capturedAt: latest?.capturedAt || snapshot?.seenAt || null,
       threshold: settings.equipmentMonitor.yt.threshold,
       thresholdLow: settings.equipmentMonitor.yt.threshold,
       thresholdRecover: settings.equipmentMonitor.yt.threshold,
@@ -316,6 +401,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       ...config.equipmentMonitor,
       latestCapturedAt: latest?.capturedAt || null,
       ytCount: latest?.ytCount || 0,
+      ytUnits: latest?.ytUnits || [],
       gcStates: latest?.gcStates || [],
     };
   });
@@ -340,7 +426,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       ...config.yeosuPilotageMonitor,
       latestCapturedAt: forecast?.seenAt || null,
       latestForecastState: forecast?.suspensionState || "none",
-      latestDutyText: forecast?.dispatchTeamDutyText || null,
+      latestDutyText: forecast?.dispatchTeamDutyText || forecast?.standbyCallText || forecast?.dutyText || null,
     };
   });
 
@@ -382,12 +468,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         equipment: {
           capturedAt: equipmentLatest?.capturedAt || null,
           ytCount: equipmentLatest?.ytCount || 0,
+          ytUnits: equipmentLatest?.ytUnits || [],
           gcStates: equipmentLatest?.gcStates || [],
         },
         yeosuPilotage: {
           capturedAt: forecast?.seenAt || null,
           suspensionState: forecast?.suspensionState || "none",
-          dutyText: forecast?.dispatchTeamDutyText || null,
+          dutyText: forecast?.dispatchTeamDutyText || forecast?.standbyCallText || forecast?.dutyText || null,
         },
       },
     };
@@ -446,6 +533,21 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/api/events", async (request) => {
     const query = request.query as { limit?: string };
     return buildAlertsResponse(query.limit);
+  });
+
+  app.delete("/api/events", async () => {
+    const deleted = await deps.repo.clearEventHistory();
+    const clearedAt = new Date().toISOString();
+    deps.sseHub.broadcast("events_cleared", {
+      clearedAt,
+      deleted,
+    });
+
+    return {
+      ok: true,
+      clearedAt,
+      deleted,
+    };
   });
 
   app.post("/api/devices/register", async (request, reply) => {

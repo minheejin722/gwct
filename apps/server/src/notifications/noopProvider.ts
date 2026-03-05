@@ -7,7 +7,7 @@ export class NoopNotificationProvider implements NotificationProvider {
     return {
       provider: this.name,
       success: true,
-      successCount: request.tokens.length,
+      successCount: request.recipients.length,
       errorCount: 0,
       errors: [],
     };

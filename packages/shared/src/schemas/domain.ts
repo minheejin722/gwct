@@ -123,24 +123,99 @@ export const YTCountSnapshotSchema = z.object({
 });
 export type YTCountSnapshot = z.infer<typeof YTCountSnapshotSchema>;
 
+export const YTSemanticStateSchema = z.enum(["active", "stopped", "logged_out"]);
+export type YTSemanticState = z.infer<typeof YTSemanticStateSchema>;
+
+export const YTUnitSnapshotSchema = z.object({
+  ytNo: z.string(),
+  driverName: z.string().nullable(),
+  loginTime: z.string().nullable(),
+  hkName: z.string().nullable(),
+  stopReason: z.string().nullable(),
+  semanticState: YTSemanticStateSchema,
+  fingerprint: z.string(),
+});
+export type YTUnitSnapshot = z.infer<typeof YTUnitSnapshotSchema>;
+
+export const YTUnitTransitionKindSchema = z.enum([
+  "active_to_stopped",
+  "active_to_logged_out",
+  "stopped_to_active",
+  "logged_out_to_active",
+  "stopped_reason_changed",
+]);
+export type YTUnitTransitionKind = z.infer<typeof YTUnitTransitionKindSchema>;
+
+export const YTUnitStatusChangedPayloadSchema = z.object({
+  type: z.literal("yt_unit_status_changed"),
+  transitionKind: YTUnitTransitionKindSchema,
+  ytNo: z.string(),
+  driverName: z.string().nullable(),
+  previousState: YTSemanticStateSchema,
+  currentState: YTSemanticStateSchema,
+  previousReason: z.string().nullable(),
+  currentReason: z.string().nullable(),
+  loginTime: z.string().nullable(),
+  message: z.string(),
+  previousFingerprint: z.string(),
+  currentFingerprint: z.string(),
+});
+export type YTUnitStatusChangedPayload = z.infer<typeof YTUnitStatusChangedPayloadSchema>;
+
 export const YTThresholdRuleSchema = z.object({
   threshold: z.number().int().nonnegative(),
   enabled: z.boolean(),
 });
 export type YTThresholdRule = z.infer<typeof YTThresholdRuleSchema>;
 
+export const GwctEtaDirectionSchema = z.enum(["earlier", "later"]);
+export type GwctEtaDirection = z.infer<typeof GwctEtaDirectionSchema>;
+
+export const GwctEtaChangedPayloadSchema = z.object({
+  type: z.literal("gwct_eta_changed"),
+  voyage: z.string(),
+  vesselKey: z.string(),
+  vesselName: z.string(),
+  previousEta: z.string(),
+  currentEta: z.string(),
+  deltaMinutes: z.number().int(),
+  direction: GwctEtaDirectionSchema,
+  crossedDate: z.boolean(),
+  humanMessage: z.string(),
+  indexInWatchWindow: z.number().int().nullable(),
+  trackingCount: z.number().int().min(1).max(11),
+  sourceUrl: z.string(),
+  capturedAt: z.string(),
+});
+export type GwctEtaChangedPayload = z.infer<typeof GwctEtaChangedPayloadSchema>;
+
 export const WeatherNoticeSnapshotSchema = z.object({
   source: SourceIdSchema,
   dutyText: z.string().nullable(),
   dispatchTeamDutyText: z.string().nullable(),
+  standbyCallText: z.string().nullable(),
   noticeHeadline: z.string().nullable(),
   suspensionState: z.enum(["none", "partial", "all"]),
+  semanticState: z.enum(["NORMAL", "SUSPENDED", "UNKNOWN"]),
   matchedKeywords: z.array(z.string()),
+  normalizedReason: z.string().nullable(),
   severity: z.enum(["normal", "warning", "critical"]),
   signature: z.string(),
   seenAt: z.string(),
 });
 export type WeatherNoticeSnapshot = z.infer<typeof WeatherNoticeSnapshotSchema>;
+
+export const WeatherTransitionPayloadSchema = z.object({
+  oldState: z.enum(["none", "partial", "all"]),
+  newState: z.enum(["none", "partial", "all"]),
+  oldSemanticState: z.enum(["NORMAL", "SUSPENDED"]),
+  newSemanticState: z.enum(["NORMAL", "SUSPENDED"]),
+  dispatchTeamText: z.string().nullable(),
+  standbyCallText: z.string().nullable(),
+  matchedKeywords: z.array(z.string()),
+  normalizedReason: z.string().nullable(),
+});
+export type WeatherTransitionPayload = z.infer<typeof WeatherTransitionPayloadSchema>;
 
 export const WeatherAlertEventSchema = z.object({
   id: z.string(),
@@ -216,9 +291,9 @@ export type AlertEvent = z.infer<typeof AlertEventSchema>;
 
 export const DashboardSummarySchema = z.object({
   lastUpdatedAt: z.string().nullable(),
-  vesselCount: z.number().int().nonnegative(),
-  craneCount: z.number().int().nonnegative(),
-  equipmentActiveCount: z.number().int().nonnegative(),
+  trackedVesselCount: z.number().int().nonnegative(),
+  workingCraneCount: z.number().int().nonnegative(),
+  supportEquipmentLoginCount: z.number().int().nonnegative(),
   ytLoggedInCount: z.number().int().nonnegative(),
   weatherState: z.enum(["none", "partial", "all"]),
   alertCount24h: z.number().int().nonnegative(),

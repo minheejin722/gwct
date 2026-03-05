@@ -7,12 +7,14 @@ import {
   detectGcRemainingLowEvents,
   detectGwctEtaChangedEvents,
   detectYtCountStateEvents,
+  detectYtUnitStatusEvents,
   diffVesselItems,
   diffWeather,
 } from "../engine/diff.js";
 import { parseBySource } from "../parsers/index.js";
 import { sha256 } from "../lib/hash.js";
 import type { NotificationService } from "../notifications/service.js";
+import { shouldDispatchRealtimeNotification } from "../notifications/policy.js";
 import type { HtmlFetcher } from "../scraper/fetcher.js";
 import { SOURCE_DEFINITIONS, type SourceDefinition } from "../scraper/sources.js";
 import { saveGcLatestSnapshot, summarizeGcRange, type GcRemainingSnapshot } from "./gc/latestStore.js";
@@ -26,6 +28,7 @@ import {
   summarizeEquipmentFocus,
   type EquipmentFocusSnapshot,
 } from "./equipment/latestStore.js";
+import { buildYtUnitSnapshotFromEquipment, countLoggedInYtUnits } from "./equipment/ytUnits.js";
 import {
   loadMonitorSettings,
   setYeosuObservedState,
@@ -104,7 +107,7 @@ export class MonitorService {
         await this.persistScheduleFocusSnapshot(bundle.vessels, seenAt, fetchResult.url);
       }
       if (sourceDef.source === "gwct_equipment_status") {
-        await this.persistEquipmentLatestSnapshot(bundle.equipment, bundle.yt, seenAt, fetchResult.url);
+        await this.persistEquipmentLatestSnapshot(bundle.equipment, seenAt, fetchResult.url);
       }
 
       const events = await this.persistAndBuildEvents(sourceDef.source, bundle, seenAt, fetchResult.url);
@@ -332,19 +335,52 @@ export class MonitorService {
       }
     }
 
+    let previousEquipmentRows: ReturnType<typeof parseBySource>["equipment"] = [];
     if (bundle.equipment.length) {
-      const prev = await this.repo.getLatestEquipmentStatuses(source);
+      previousEquipmentRows = await this.repo.getLatestEquipmentStatuses(source);
       await this.repo.saveEquipmentStatuses(bundle.equipment);
-      if (prev.length && monitorSettings.equipmentMonitor.gcStaff.enabled) {
-        alerts.push(...detectGcEquipmentFocusEvents(prev, bundle.equipment, source, occurredAt, { sourceUrl }));
+      if (previousEquipmentRows.length && monitorSettings.equipmentMonitor.gcStaff.enabled) {
+        alerts.push(
+          ...detectGcEquipmentFocusEvents(previousEquipmentRows, bundle.equipment, source, occurredAt, { sourceUrl }),
+        );
+      }
+      if (previousEquipmentRows.length && monitorSettings.equipmentMonitor.yt.enabled) {
+        alerts.push(
+          ...detectYtUnitStatusEvents(previousEquipmentRows, bundle.equipment, source, occurredAt, { sourceUrl }),
+        );
       }
     }
 
-    if (bundle.yt) {
-      bundle.yt.threshold = monitorSettings.equipmentMonitor.yt.threshold;
-      await this.repo.saveYtSnapshot(bundle.yt);
-      const ytTransition = detectYtCountStateEvents(bundle.yt, monitorSettings.equipmentMonitor.yt, source, occurredAt, {
+    if (source === "gwct_equipment_status") {
+      const previousYtSnapshot = await this.repo.getLatestYtSnapshot(source);
+      const ytUnits = buildYtUnitSnapshotFromEquipment(bundle.equipment);
+      const ytLoggedInCount = countLoggedInYtUnits(ytUnits);
+      const ytSnapshot =
+        ytUnits.length > 0
+          ? {
+              source,
+              totalLoggedIn: ytLoggedInCount,
+              totalKnown: ytUnits.length,
+              threshold: monitorSettings.equipmentMonitor.yt.threshold,
+              signature: sha256(
+                JSON.stringify({
+                  source,
+                  totalLoggedIn: ytLoggedInCount,
+                  totalKnown: ytUnits.length,
+                  seenAt: occurredAt,
+                }),
+              ),
+              seenAt: occurredAt,
+            }
+          : null;
+
+      if (ytSnapshot) {
+        await this.repo.saveYtSnapshot(ytSnapshot);
+      }
+
+      const ytTransition = detectYtCountStateEvents(ytSnapshot, monitorSettings.equipmentMonitor.yt, source, occurredAt, {
         sourceUrl,
+        previousCount: previousYtSnapshot?.totalLoggedIn ?? null,
       });
       alerts.push(...ytTransition.events);
       if (
@@ -365,18 +401,46 @@ export class MonitorService {
           current = {
             ...current,
             suspensionState: notice.suspensionState,
+            semanticState: notice.semanticState,
             severity: notice.severity,
             noticeHeadline: notice.noticeHeadline,
             matchedKeywords: Array.from(new Set([...current.matchedKeywords, ...notice.matchedKeywords])),
+            normalizedReason: notice.normalizedReason || current.normalizedReason,
           } satisfies WeatherNoticeSnapshot;
         }
+      }
+
+      if (source === "ys_forecast" && current.semanticState === "UNKNOWN") {
+        const fallbackSemanticState =
+          monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "all" ||
+          monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "partial"
+            ? "SUSPENDED"
+            : monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "none"
+              ? "NORMAL"
+              : prev?.suspensionState === "all" || prev?.suspensionState === "partial"
+                ? "SUSPENDED"
+                : "NORMAL";
+
+        current = {
+          ...current,
+          semanticState: fallbackSemanticState,
+          suspensionState: fallbackSemanticState === "SUSPENDED" ? "all" : "none",
+          normalizedReason:
+            current.normalizedReason ||
+            `AMBIGUOUS_KEEP_PREV:${fallbackSemanticState}`,
+        } satisfies WeatherNoticeSnapshot;
       }
 
       await this.repo.saveWeatherSnapshot(current);
 
       if (source === "ys_forecast") {
         const weatherText = current.dispatchTeamDutyText || current.noticeHeadline || current.dutyText || null;
-        const weatherState = current.suspensionState;
+        const weatherState =
+          current.semanticState === "UNKNOWN"
+            ? monitorSettings.yeosuPilotageMonitor.lastNormalizedState || current.suspensionState
+            : current.semanticState === "SUSPENDED"
+              ? "all"
+              : "none";
         const observedChanged =
           monitorSettings.yeosuPilotageMonitor.lastRawText !== weatherText ||
           monitorSettings.yeosuPilotageMonitor.lastNormalizedState !== weatherState;
@@ -408,28 +472,20 @@ export class MonitorService {
 
   private async emitEvents(events: AlertEventInput[], seenAt: string): Promise<void> {
     const emitted: Array<{ id: string; event: AlertEventInput }> = [];
+    const seenSemanticFingerprints = new Set<string>();
 
     for (const event of events) {
-      const useCooldown =
-        event.type !== "gwct_eta_changed" &&
-        event.type !== "yt_count_low" &&
-        event.type !== "yt_count_recovered" &&
-        !event.type.startsWith("gc_");
-      if (useCooldown) {
-        const recent = await this.repo.findRecentAlertByDedupe(event.dedupeKey);
-        if (recent) {
-          const elapsedMs = new Date(seenAt).getTime() - recent.lastSeenAt.getTime();
-          const cooldownMs = env.COOLDOWN_MINUTES * 60_000;
-          if (elapsedMs < cooldownMs) {
-            await this.repo.touchAlertEvent(recent.id, seenAt);
-            continue;
-          }
-        }
+      const semanticFingerprint = `${event.source}:${event.type}:${event.dedupeKey}`;
+      if (seenSemanticFingerprints.has(semanticFingerprint)) {
+        continue;
       }
+      seenSemanticFingerprints.add(semanticFingerprint);
 
       const created = await this.repo.createAlertEvent(event);
       emitted.push({ id: created.id, event });
-      await this.notificationService.dispatch(created.id, event);
+      if (shouldDispatchRealtimeNotification(event.type)) {
+        await this.notificationService.dispatch(created.id, event);
+      }
     }
 
     if (emitted.length) {
@@ -466,7 +522,6 @@ export class MonitorService {
 
   private async persistEquipmentLatestSnapshot(
     equipment: ReturnType<typeof parseBySource>["equipment"],
-    yt: ReturnType<typeof parseBySource>["yt"],
     capturedAt: string,
     sourceUrl: string,
   ): Promise<void> {
@@ -500,12 +555,15 @@ export class MonitorService {
       );
     }
 
+    const ytUnits = buildYtUnitSnapshotFromEquipment(equipment);
+
     const snapshot: EquipmentFocusSnapshot = {
       source: "gwct_equipment_status",
       sourceUrl,
       capturedAt,
-      ytCount: yt?.totalLoggedIn ?? 0,
-      ytKnown: yt?.totalKnown ?? 0,
+      ytCount: countLoggedInYtUnits(ytUnits),
+      ytKnown: ytUnits.length,
+      ytUnits,
       gcStates,
     };
 

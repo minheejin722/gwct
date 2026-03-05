@@ -333,3 +333,230 @@
   - `npx expo-doctor` (`apps/mobile`) ✅ (`17/17`)
   - `npm run typecheck` ✅
   - `npm test` ✅ (server `20/20`)
+
+## Crane Duplicate Key Fix Plan (2026-03-04)
+- [x] Trace Crane Status UI render path (`apps/mobile`) and confirm all sibling key sites.
+- [x] Trace server data path (`/api/cranes/live` + parser/selector) and confirm whether duplicate `craneId` rows are accidental or structurally valid.
+- [x] Apply minimal root-cause fix:
+  - [x] normalize/dedupe accidental duplicate crane rows at server response boundary.
+  - [x] make mobile render key strategy stable and collision-safe for legally repeated crane IDs.
+- [x] Add dev-only duplicate key detector guard for crane list rendering.
+- [x] Add deterministic regression coverage for duplicate-row normalization/key behavior.
+- [x] Run validation (`npm run typecheck` and relevant tests), then document root cause/files/tests/risks.
+
+## Crane Duplicate Key Fix Review
+- Root cause:
+  - `/api/cranes/live` returned latest `gwct_work_status` rows with duplicated `craneId` (`GC181~GC190` repeated per vessel table) because parser path (`parseGwctWorkStatus` using selector `gwctSelectors.workStatus.table`) emits per-table rows.
+  - mobile Crane Status list keyed by `item.craneId`, so duplicated server rows created React sibling key collision (`'.$GC181'`).
+- Fix:
+  - Added server-side live-row normalization (`normalizeCraneLiveRows`) and applied it to `/api/cranes/live`.
+  - Added mobile composite render key + dev-only duplicate detector logging.
+  - Added regression tests for crane live normalization behavior.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (mobile test script placeholder, server 22/22 passing including new normalization tests)
+- Residual risk:
+  - If upstream work-status semantics require true multi-row-per-crane presentation in future UI, current `/api/cranes/live` normalization will collapse to one row per crane by design.
+
+## Yeosu Suspension Monitor Upgrade Plan (2026-03-04)
+- [x] Trace and update forecast parser to extract both `배선팀근무` and `대기호출자`.
+- [x] Add robust text normalization + combined signal classifier:
+  - [x] suspend keyword/pattern coverage (KOR/ENG variants).
+  - [x] normal/resume indicator coverage.
+  - [x] ambiguous case marker for semantic state carry-over.
+- [x] Update shared weather schema/event payload contract with debug fields needed by mobile (`dispatchTeamText`, `standbyCallText`, `matchedKeywords`, `normalizedReason`).
+- [x] Refactor weather diff rules:
+  - [x] alert only on `NORMAL -> SUSPENDED` and `SUSPENDED -> NORMAL`.
+  - [x] keep `TEXT_CHANGED` as history event only when semantic state unchanged.
+- [x] Ensure notification delivery (push/SSE/foreground) is transition-only for weather; no sound/push for `TEXT_CHANGED`.
+- [x] Add iOS tri-tone style sound policy helper with Expo Go / unavailable fallback to default.
+- [x] Update mobile weather/events UI labels and rendering for new standby/debug payload fields.
+- [x] Add regression tests for required sample texts and transition dedupe behavior.
+- [x] Run `npm run typecheck` and relevant tests; document review summary and residual risks.
+
+## Yeosu Suspension Monitor Upgrade Review
+- Root cause:
+  - Forecast parsing was effectively single-signal (`배선팀근무`) 중심이라, `대기호출자`에 나타나는 정상/복구 신호를 반영하지 못했고 문구 변화와 상태 전환이 분리되지 않았습니다.
+  - Weather 이벤트 `TEXT_CHANGED`도 일반 알림 경로를 타서 transition-only 알림 정책을 보장하지 못했습니다.
+- Fix:
+  - Parser:
+    - `배선팀근무` + `대기호출자`를 동시 추출하고 텍스트 정규화(공백/기호 정리, 영문 대문자화) 후 결합 신호 분류.
+    - suspend 우선, normal 다음, 둘 다 없으면 `UNKNOWN` semantic.
+  - Diff/알림:
+    - semantic 전환 기준으로 `NORMAL -> SUSPENDED`만 `ALL_SUSPENDED`, `SUSPENDED -> NORMAL`만 `RESUMED`.
+    - semantic 동일 시 `TEXT_CHANGED` 히스토리만 생성.
+    - `TEXT_CHANGED`는 push/SSE dispatch 제외하여 소리/푸시/foreground 알림 차단.
+  - Shared 타입:
+    - weather snapshot/event payload debug 필드 확장 (`standbyCallText`, `semanticState`, `normalizedReason` 등).
+  - Mobile:
+    - Weather 화면 라벨/표시를 배선팀+대기호출자 기반으로 갱신.
+    - Alerts 탭에서 weather payload debug 필드 표시.
+    - iOS tri-tone 경로 상수 연동 + Expo Go/실패 시 default fallback.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (mobile tests not configured, server 27/27)
+  - Focused regression:
+    - `npm --workspace @gwct/server run test -- --run tests/weather-parser.test.ts tests/weather-diff.test.ts tests/notification-policy.test.ts tests/integration-alert.test.ts` ✅
+- Residual risk:
+  - Prisma `WeatherNoticeSnapshot` 테이블에는 전용 `standbyCallText` 컬럼이 없어 `dutyText` 컬럼을 재사용해 저장합니다.
+  - iOS custom sound binary가 아직 repo에 없으므로 기본 동작은 fallback(`default`)이며, 실제 커스텀 적용은 추후 사운드 파일 추가/빌드 배포가 필요합니다.
+
+## YT Unit Monitor Redesign Plan (2026-03-04)
+- [x] Reconfirm current GWCT equipment parser fields and YT monitor/event/mobile API usage paths (server/shared/mobile) and lock minimal-impact change points.
+- [x] Extend shared domain/event schema for YT unit snapshot + YT unit status change payload while preserving existing event/deeplink flow.
+- [x] Implement server-side YT unit snapshot normalization from existing equipment rows and persist it in latest equipment snapshot for API/mobile reuse.
+- [x] Redesign YT count state machine in diff engine to satisfy strict transition rules (baseline no alert, unchanged count no event, under-threshold downward alerts, recovery at `>= threshold`).
+- [x] Add per-YT transition detector (`active/stopped/logged_out`) with stable key + fingerprint and emit `yt_unit_status_changed` only on required transitions/reason changes.
+- [x] Wire monitor service/API updates (`/api/yt/live`) so count summary and unit list are consistent and no duplicate re-alert on identical states.
+- [x] Update mobile YT Count and Events UI/filter/labels to render new YT unit states and payload details.
+- [x] Align sound/dedupe policy across SSE/local/push path to avoid duplicate user-visible alerts when the same event arrives on multiple channels.
+- [x] Add table-driven regression tests for required count/unit scenarios and run validation (`npm run typecheck` + relevant tests).
+
+## YT Unit Monitor Redesign Review
+- Root cause:
+  - Existing YT monitor pipeline only tracked aggregate count state (`NORMAL/LOW`) and had no per-YT snapshot key/fingerprint layer, so unit-level transitions (중단/로그아웃/복귀/사유변경) were not representable.
+  - Count transition function depended on coarse state only, so it could not enforce “under-threshold additional drop only” rule and “unchanged count no event” deterministically.
+  - `/api/yt/live` exposed count snapshot only, so YT Count UI and event detail UI could not display current per-unit status.
+- Fix:
+  - Added YT unit snapshot normalization (`ytNo`, `driverName`, `loginTime`, `hkName`, `stopReason`, `semanticState`, `fingerprint`) from existing equipment rows.
+  - Reworked YT count state machine to compare `previousCount -> currentCount` with explicit baseline/no-change/downward/recovery rules.
+  - Added generic unit transition event `yt_unit_status_changed` with `transitionKind` + debug payload fields.
+  - Extended equipment latest snapshot + `/api/yt/live` response to include `units`, `ytCount`, `ytKnown`, `capturedAt`.
+  - Updated mobile YT screen to show sorted per-unit status list and Alerts screen to render YT unit transition payload.
+  - Added shared alert sound resolver and eventId-based secondary dedupe across SSE/local/push.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 31/31 including new `yt-monitor.test.ts`; mobile test script placeholder)
+  - `npm run lint` ✅ (workspace lint scripts are placeholders)
+- Residual risk:
+  - If GWCT page ever omits a YT row entirely (not blank login but missing row), the next re-appearance can be treated as fresh baseline for that unit because persistence is scrape-snapshot based.
+  - iOS custom tri-tone file is still optional; when binary is unavailable in app bundle, policy intentionally falls back to `default`.
+
+## Common Semantic Dedupe Plan (2026-03-04)
+- [x] Audit server event generation path and remove timestamp/cooldown-based suppression from emit pipeline.
+- [x] Enforce semantic-state unchanged => no-event policy for all active monitors (ETA/GC remaining/GC staff/YT count/Yeosu).
+- [x] Keep dedupe behavior as state-based (allow re-alert after real state transition and return), not permanent one-time suppression.
+- [x] Harden client secondary dedupe so the same event arriving via SSE and push is displayed once (eventId deterministic guard).
+- [x] Add semantic no-event regression tests and rerun validation (`typecheck`, `test`, `lint`).
+
+## Common Semantic Dedupe Review
+- Server dedupe layer:
+  - Removed `AlertEvent` lookup + cooldown gate from `MonitorService.emitEvents`; event creation now relies on monitor-level semantic diff and batch semantic fingerprint set (`source:type:dedupeKey`) to prevent same-batch duplicates.
+  - Updated weather diff to emit only semantic transitions (`NORMAL <-> SUSPENDED`); same semantic now emits no event.
+- Client dedupe layer:
+  - Added `eventId` secondary dedupe guard in mobile notification handler (`rememberAlertEvent` map with TTL) so SSE/local and push paths do not double-show the same alert.
+  - Included `eventId` in server push payload and SSE-scheduled local notification payload for consistent cross-channel keying.
+- Monitor audit result:
+  - GWCT ETA: unchanged ETA/window state => no event.
+  - GC remaining: unchanged subtotal state => no event.
+  - GC staff change: unchanged operator/HK/login/stop state => no event.
+  - YT count: unchanged count or non-semantic move => no event.
+  - Yeosu pilotage: unchanged semantic state => no event.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 32/32)
+  - `npm run lint` ✅ (workspace lint scripts remain placeholders)
+
+## GWCT ETA Monitor Improvement Plan (2026-03-04)
+- [x] Audit current ETA compare path (`detectGwctEtaChangedEvents`), payload contract, and vessel mobile UI render path.
+- [x] Add shared ETA change formatter/helper so server event message and mobile display can stay consistent.
+- [x] Tighten ETA change rule to emit `gwct_eta_changed` only when normalized ETA comparison is semantically different and both previous/current ETA are present.
+- [x] Expand ETA payload fields (`previousEta`, `currentEta`, `deltaMinutes`, `direction`, `crossedDate`, `humanMessage`) and keep compatible vessel metadata.
+- [x] Improve vessel live endpoint to attach latest meaningful ETA change (per vessel, one item) for direct card rendering.
+- [x] Update mobile vessel screen to show ETA change message under vessel card with direction color (`earlier=red`, `later=blue`) and readable contrast.
+- [x] Add regression tests for same-day earlier/later, next-day rollover, missing previous ETA fallback, and identical normalized ETA no-event.
+- [x] Run validation (`npm run typecheck`, `npm test`, `npm run lint`) and document results.
+
+## GWCT ETA Monitor Improvement Review
+- Root cause:
+  - Existing ETA event payload was minimal (`etaBefore/etaAfter`) and message formatting lived inside server diff logic, so UI and notification wording drifted and date rollover semantics were not explicit.
+  - Missing-ETA transitions were treated as changes, making direction/delta semantics ambiguous.
+- Fix:
+  - Added shared ETA formatter (`summarizeGwctEtaChange`) in `packages/shared` and used it in server ETA diff.
+  - `gwct_eta_changed` now emits only when normalized ETA truly differs and both sides are present.
+  - Payload now includes:
+    - `previousEta`
+    - `currentEta`
+    - `deltaMinutes`
+    - `direction`
+    - `crossedDate`
+    - `humanMessage`
+  - `/api/vessels/live` now includes per-vessel `latestEtaChange` (latest meaningful 1건) built from recent alerts.
+  - Mobile vessel cards now show ETA change message immediately below the vessel row with direction-based colors.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 36/36, includes new ETA monitor tests)
+  - `npm run lint` ✅ (workspace lint scripts are placeholders)
+- Residual risk:
+  - `/api/vessels/live` enriches ETA change by scanning recent alerts (`limit=500`), so extremely high event volume may require a dedicated indexed query endpoint later.
+
+## Home Summary Aggregation Fix Plan (2026-03-04)
+- [x] Audit `/api/dashboard/summary` and home screen consumer to identify why counts inflate and verify whether aggregation is historical or snapshot-based.
+- [x] Redefine summary metrics with explicit semantics:
+  - [x] tracked vessel count from ETA watch window (`min(trackingCount, actualCurrentWatchWindowLength)`).
+  - [x] working crane count for GC181~GC190 only with explicit working rule.
+  - [x] support equipment login count for `LEASE/REPAIR/RS/TC` only with valid `driverName + loginTime`.
+- [x] Implement server summary aggregation helper and wire route to latest snapshot/config-based computation.
+- [x] Update shared summary schema and mobile home UI to consume clarified field names and deterministic metric formatter.
+- [x] Add tests:
+  - [x] summary aggregator unit tests.
+  - [x] deterministic formatter test for home metric rendering text.
+- [x] Run validation (`npm run typecheck`, `npm test`, `npm run lint`) and record results.
+
+## Home Summary Aggregation Fix Review
+- Root cause:
+  - Previous summary used cumulative DB row counts (`count(*)`) for vessel/crane/equipment, so values grew over time and no longer represented current operation status.
+  - Equipment login count included all equipment rows with non-null operator, mixing GC/YT and historical records.
+- Fix:
+  - Added dashboard aggregation helper (`services/dashboard/summary.ts`) and switched `/api/dashboard/summary` to latest snapshot/config based counts.
+  - Clarified payload fields:
+    - `trackedVesselCount`
+    - `workingCraneCount`
+    - `supportEquipmentLoginCount`
+  - Home UI now renders these fields with deterministic formatter (`formatDashboardMetric`) to avoid ambiguous number rendering.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 40/40; mobile tests not configured)
+  - `npm run lint` ✅ (workspace lint scripts remain placeholders)
+
+## Event Log Clear Feature Plan (2026-03-04)
+- [x] Audit event history storage/API/mobile event source and define clear scope (delete only history, keep monitor baselines/state/config/device settings).
+- [x] Add server-side event history clear repository method + API endpoint (`DELETE /api/events`) and broadcast lightweight SSE sync event (`events_cleared`).
+- [x] Ensure clear target includes recent event source used by mobile while excluding snapshots/state machine baselines/thresholds/configs.
+- [x] Update mobile Events screen with destructive clear button, confirm modal, loading state, success/fail feedback, and immediate list emptying.
+- [x] Add mobile-side secondary sync handling for `events_cleared` SSE to keep multiple clients consistent.
+- [x] Add regression tests:
+  - [x] history populated -> clear -> empty
+  - [x] clear 후 baseline/state 보존으로 same current state 즉시 재알람 없음
+  - [x] clear 후 refresh에서도 empty 유지 확인
+- [x] Run validation (`npm run typecheck`, `npm test`, `npm run lint`) and document review.
+
+## Event Log Clear Feature Review
+- Added server event-history clear scope at repository layer (`clearEventHistory`) to delete only event log tables (`alertEvent`, `vesselScheduleChangeEvent`, `equipmentLoginEvent`, `weatherAlertEvent`, `notificationLog`).
+- Added REST endpoint `DELETE /api/events` returning deleted counts and `clearedAt`, and broadcasting SSE `events_cleared` for multi-client sync.
+- Mobile Events screen now includes destructive full-clear action with confirm dialog, loading indicator, success/fail feedback, and immediate local list emptying.
+- Mobile Events screen listens to SSE `events_cleared` and clears visible list so concurrently open clients stay in sync until next poll.
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 42/42, mobile tests not configured)
+  - `npm run lint` ✅ (workspace lint scripts are placeholders)
+
+## Expo Go Shared Module Resolution Plan (2026-03-04)
+- [x] Reproduce the Expo/Metro failure and identify the exact import resolution mismatch.
+- [x] Fix `packages/shared` internal exports/imports so Expo Go can resolve modules without breaking server/runtime consumers.
+- [x] Re-run `npm run typecheck` and `npx expo export --platform ios --clear` to verify bundle/runtime readiness.
+- [x] Document root cause, changed files, and remaining runtime risks.
+
+## Expo Go Shared Module Resolution Review
+- Root cause: `@gwct/shared` default entry (`src/index.ts`) used NodeNext-style internal imports with explicit `.js` suffix (`./schemas/domain.js`, `./events/index.js`). Expo Metro resolves TS source directly in monorepo and could not map those `.js` suffix paths to existing TS files, causing runtime bundle failure.
+- Fix strategy: keep existing Node/server path unchanged, and add a mobile-only entry path:
+  - `react-native` conditional export to `src/index.native.ts`
+  - `react-native` top-level field to the same native entry
+  - native entry files use extensionless internal imports that Metro resolves correctly.
+- Shared package typecheck compatibility:
+  - `packages/shared/tsconfig.json` now overrides `module`/`moduleResolution` to `ESNext` + `Bundler` so both `.js` (Node entry) and extensionless (native entry) imports typecheck cleanly.
+- Validation:
+  - `npx expo export --platform ios --output-dir dist-test --clear` ✅ (bundle success)
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server 42/42, mobile tests not configured)
+  - `npm run lint` ✅ (workspace lint scripts are placeholders)

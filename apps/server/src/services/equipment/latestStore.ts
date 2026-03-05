@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { YTUnitSnapshot } from "@gwct/shared";
 
 export interface GcEquipmentState {
   gcNo: number;
@@ -17,6 +18,7 @@ export interface EquipmentFocusSnapshot {
   capturedAt: string;
   ytCount: number;
   ytKnown: number;
+  ytUnits: YTUnitSnapshot[];
   gcStates: GcEquipmentState[];
 }
 
@@ -40,8 +42,11 @@ export async function loadEquipmentLatestSnapshot(): Promise<EquipmentFocusSnaps
 }
 
 export function summarizeEquipmentFocus(snapshot: EquipmentFocusSnapshot): string {
+  const active = snapshot.ytUnits.filter((row) => row.semanticState === "active").length;
+  const stopped = snapshot.ytUnits.filter((row) => row.semanticState === "stopped").length;
+  const loggedOut = snapshot.ytUnits.filter((row) => row.semanticState === "logged_out").length;
   const parts = snapshot.gcStates.map((row) => {
     return `GC${row.gcNo} driver=${row.driverName || "-"} hk=${row.hkName || "-"} stop=${row.stopReason || "-"}`;
   });
-  return `[EQUIP] YT=${snapshot.ytCount} | ${parts.join(" | ")}`;
+  return `[EQUIP] YT=${snapshot.ytCount}/${snapshot.ytKnown} active=${active} stopped=${stopped} logged_out=${loggedOut} | ${parts.join(" | ")}`;
 }

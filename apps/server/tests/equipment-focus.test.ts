@@ -83,7 +83,7 @@ describe("equipment focus parser and event rules", () => {
       { ...baseConfig, stateInitialized: true, state: "LOW" },
       "gwct_equipment_status",
       "2026-03-01T12:01:00.000Z",
-      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A" },
+      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A", previousCount: 24 },
     );
     expect(stayLow.events).toHaveLength(0);
     expect(stayLow.nextState).toBe("LOW");
@@ -93,18 +93,18 @@ describe("equipment focus parser and event rules", () => {
       { ...baseConfig, stateInitialized: true, state: "LOW" },
       "gwct_equipment_status",
       "2026-03-01T12:02:00.000Z",
-      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A" },
+      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A", previousCount: 24 },
     );
     expect(recovered.events).toHaveLength(1);
     expect(recovered.events[0]?.type).toBe("yt_count_recovered");
     expect(recovered.nextState).toBe("NORMAL");
 
     const goLow = detectYtCountStateEvents(
-      ytSnapshot(25),
+      ytSnapshot(24),
       { ...baseConfig, stateInitialized: true, state: "NORMAL" },
       "gwct_equipment_status",
       "2026-03-01T12:03:00.000Z",
-      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A" },
+      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A", previousCount: 25 },
     );
     expect(goLow.events).toHaveLength(1);
     expect(goLow.events[0]?.type).toBe("yt_count_low");

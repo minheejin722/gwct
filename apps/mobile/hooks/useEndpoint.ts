@@ -68,5 +68,6 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
     error,
     updatedAt,
     refresh,
+    setData,
   };
 }

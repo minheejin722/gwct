@@ -1,11 +1,12 @@
-﻿import { env } from "../config/env.js";
+﻿import { resolveAlertSoundPath } from "@gwct/shared";
+import { env } from "../config/env.js";
 import type { NotificationProvider, NotificationRequest, NotificationResult } from "./provider.js";
 
 export class ExpoPushProvider implements NotificationProvider {
   readonly name = "expo";
 
   async send(request: NotificationRequest): Promise<NotificationResult> {
-    if (!request.tokens.length) {
+    if (!request.recipients.length) {
       return {
         provider: this.name,
         success: true,
@@ -15,12 +16,16 @@ export class ExpoPushProvider implements NotificationProvider {
       };
     }
 
-    const messages = request.tokens.map((token) => ({
-      to: token,
+    const messages = request.recipients.map((recipient) => ({
+      to: recipient.token,
       title: request.title,
       body: request.body,
       data: request.data,
-      sound: "default",
+      sound: resolveAlertSoundPath({
+        platform: recipient.platform,
+        preferCustomIosSound: env.iosCustomAlertSound,
+        customSoundAvailable: env.iosCustomAlertSound,
+      }),
       priority: "high",
     }));
 
@@ -42,7 +47,7 @@ export class ExpoPushProvider implements NotificationProvider {
         provider: this.name,
         success: false,
         successCount: 0,
-        errorCount: request.tokens.length,
+        errorCount: request.recipients.length,
         errors: [`Expo HTTP ${response.status}`],
       };
     }
@@ -63,7 +68,7 @@ export class ExpoPushProvider implements NotificationProvider {
     return {
       provider: this.name,
       success: errors.length === 0,
-      successCount: request.tokens.length - errors.length,
+      successCount: request.recipients.length - errors.length,
       errorCount: errors.length,
       errors,
     };
