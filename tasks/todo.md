@@ -560,3 +560,47 @@
   - `npm run typecheck` ✅
   - `npm test` ✅ (server 42/42, mobile tests not configured)
   - `npm run lint` ✅ (workspace lint scripts are placeholders)
+
+## 15min Retention Cleanup Plan (2026-03-05)
+- [x] Audit real DB/file accumulation paths and classify retention policy (delete/keep N/protect).
+- [x] Add retention config/env (`CLEANUP_*`, `RAW_SNAPSHOT_PERSIST`, `DB_COMPACTION_MODE`) with sane defaults.
+- [x] Implement repository cleanup primitives:
+  - [x] transient TTL deletion (`rawSnapshot`, `scrapeRun`, `parseError`, `notificationLog`)
+  - [x] append-only snapshot trimming (keep latest seenAt groups per source)
+  - [x] compaction hooks (incremental/full)
+- [x] Implement `DataRetentionService` + `CleanupScheduler` (15min interval, overlap guard, metrics logging, FS transient artifact cleanup).
+- [x] Integrate runtime startup/shutdown and add manual admin endpoint (`POST /api/admin/cleanup/run`, debug token protected).
+- [x] Improve raw snapshot persistence policy (`off | errors_only | all`) in monitor flow without breaking parser/event behavior.
+- [x] Add regression tests for cleanup retention/guards/filesystem/compaction path and fixture protection.
+- [x] Run validation (`npm run typecheck`, targeted + full tests) and capture before/after DB row/file-size evidence.
+- [x] Document results (policy table, safety guarantees, remaining risks).
+
+## 15min Retention Cleanup Review
+- Real accumulation root cause:
+  - `RawSnapshot.html` append-only growth was dominant (pre-cleanup total raw HTML bytes `215,427,807`, DB file `273,924,096` bytes).
+  - append-only snapshot history tables (`VesselScheduleItem`, `CraneStatus`, `EquipmentLoginStatus`, `YTCountSnapshot`, `WeatherNoticeSnapshot`) grew continuously per scrape.
+  - transient debug-history tables (`ScrapeRun`, `ParseError`, `NotificationLog`, `RawSnapshot`) grew without TTL.
+  - filesystem under `apps/server/data/latest` is overwrite-based and not primary growth source.
+- Retention policy implemented:
+  - TTL delete (`TRANSIENT_RETENTION_MINUTES`, default 15m): `RawSnapshot`, `ParseError`, `NotificationLog`, `ScrapeRun`.
+  - keep latest 2 seenAt groups per source: `VesselScheduleItem`, `CraneStatus`, `EquipmentLoginStatus`, `YTCountSnapshot`, `WeatherNoticeSnapshot`.
+  - preserve: `AlertEvent`/event history, monitor settings/baselines, device settings/tokens, latest JSON snapshot files.
+  - raw snapshot persistence mode added: `RAW_SNAPSHOT_PERSIST=off|errors_only|all` (default `errors_only`).
+- Runtime integration:
+  - `DataRetentionService.runCleanupOnce` + `CleanupScheduler` wired at server startup/shutdown.
+  - overlap guard for scheduler and service in-flight protection.
+  - admin endpoint: `POST /api/admin/cleanup/run` (debug token), optional `{ "fullVacuum": true }`.
+- SQLite compaction:
+  - default scheduled mode: incremental vacuum (`DB_COMPACTION_MODE=incremental`, `DB_INCREMENTAL_VACUUM_PAGES=256`).
+  - full `VACUUM` is manual-only via admin endpoint/request option to avoid 15m lock risk.
+  - verified reclaim path:
+    - pre-cleanup DB size: `273,924,096` bytes
+    - after manual full vacuum: `786,432` bytes
+    - reclaimed: `273,137,664` bytes
+- Validation:
+  - `npm run typecheck` ✅
+  - `npm test` ✅ (server `48/48`, mobile tests not configured)
+  - added tests:
+    - `tests/cleanup-service.test.ts`
+    - `tests/cleanup-scheduler.test.ts`
+    - `tests/cleanup-route.test.ts`

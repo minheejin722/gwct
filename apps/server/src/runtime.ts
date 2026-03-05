@@ -11,6 +11,8 @@ import { NoopNotificationProvider } from "./notifications/noopProvider.js";
 import { ExpoPushProvider } from "./notifications/expoProvider.js";
 import { MonitorService } from "./services/monitorService.js";
 import { Scheduler } from "./services/scheduler.js";
+import { DataRetentionService } from "./services/cleanup/service.js";
+import { CleanupScheduler } from "./services/cleanup/scheduler.js";
 import { registerRoutes } from "./routes/api.js";
 
 export async function createRuntime() {
@@ -33,11 +35,14 @@ export async function createRuntime() {
   const notificationService = new NotificationService(repo, provider, sseHub);
   const monitorService = new MonitorService(repo, fetcher, notificationService, app.log);
   const scheduler = new Scheduler(monitorService);
+  const cleanupService = new DataRetentionService(repo, app.log);
+  const cleanupScheduler = new CleanupScheduler(cleanupService, app.log);
 
   await registerRoutes(app, {
     repo,
     monitorService,
     sseHub,
+    cleanupService,
   });
 
   return {
@@ -45,6 +50,8 @@ export async function createRuntime() {
     repo,
     monitorService,
     scheduler,
+    cleanupService,
+    cleanupScheduler,
     browserPool,
   };
 }

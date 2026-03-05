@@ -25,6 +25,12 @@ const EnvSchema = z.object({
   EXPO_PUSH_ENABLED: z.string().default("false"),
   EXPO_ACCESS_TOKEN: z.string().optional(),
   IOS_CUSTOM_ALERT_SOUND: z.string().default("false"),
+  CLEANUP_ENABLED: z.string().default("true"),
+  CLEANUP_INTERVAL_MINUTES: z.coerce.number().default(15),
+  TRANSIENT_RETENTION_MINUTES: z.coerce.number().default(15),
+  RAW_SNAPSHOT_PERSIST: z.enum(["off", "errors_only", "all"]).default("errors_only"),
+  DB_COMPACTION_MODE: z.enum(["incremental", "manual", "off"]).default("incremental"),
+  DB_INCREMENTAL_VACUUM_PAGES: z.coerce.number().default(256),
 });
 
 const parsed = EnvSchema.parse(process.env);
@@ -35,6 +41,12 @@ export const env = {
   expoPushEnabled: parsed.EXPO_PUSH_ENABLED === "true",
   scheduleAlertOnWindowEnter: parsed.SCHEDULE_ALERT_ON_WINDOW_ENTER === "true",
   iosCustomAlertSound: parsed.IOS_CUSTOM_ALERT_SOUND === "true",
+  cleanupEnabled: parsed.CLEANUP_ENABLED !== "false",
+  cleanupIntervalMinutes: Math.max(1, Math.trunc(parsed.CLEANUP_INTERVAL_MINUTES)),
+  transientRetentionMinutes: Math.max(1, Math.trunc(parsed.TRANSIENT_RETENTION_MINUTES)),
+  rawSnapshotPersist: parsed.RAW_SNAPSHOT_PERSIST,
+  dbCompactionMode: parsed.DB_COMPACTION_MODE,
+  dbIncrementalVacuumPages: Math.max(1, Math.trunc(parsed.DB_INCREMENTAL_VACUUM_PAGES)),
   urls: {
     gwctH: "http://www.gwct.co.kr:8080/dashboard/?m=H&s=A",
     gwctI: "http://www.gwct.co.kr:8080/dashboard/?m=I&s=A",

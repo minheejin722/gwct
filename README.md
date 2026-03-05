@@ -87,6 +87,32 @@ npm run dev:4001
   - `equipmentMonitor.gcStaff`: `enabled`
   - `yeosuPilotageMonitor`: `enabled`, `lastRawText`, `lastNormalizedState`, `lastChangedAt`
 
+### Data Retention Cleanup
+- Cleanup scheduler runs automatically when server is on.
+- Default interval: every `15` minutes.
+- Default policy:
+  - transient debug/runtime data TTL: `15` minutes.
+  - append-only snapshot history tables: keep latest `2` seenAt groups per source.
+  - user-facing event history is preserved (not auto-deleted by retention cleanup).
+- Raw snapshot persistence policy (`RAW_SNAPSHOT_PERSIST`):
+  - `off`: do not store raw HTML snapshots.
+  - `errors_only` (default): store raw snapshot only when diagnostics exist or scrape fails.
+  - `all`: store every scrape snapshot.
+- SQLite compaction policy (`DB_COMPACTION_MODE`):
+  - `incremental` (default): run `PRAGMA incremental_vacuum(...)` on each cleanup pass.
+  - `manual`: skip scheduled compaction (manual full vacuum only via admin cleanup API).
+  - `off`: do not compact.
+- Server env keys (`apps/server/.env`):
+  - `CLEANUP_ENABLED=true`
+  - `CLEANUP_INTERVAL_MINUTES=15`
+  - `TRANSIENT_RETENTION_MINUTES=15`
+  - `RAW_SNAPSHOT_PERSIST=errors_only`
+  - `DB_COMPACTION_MODE=incremental`
+  - `DB_INCREMENTAL_VACUUM_PAGES=256`
+- Manual one-shot cleanup endpoint (debug token required):
+  - `POST /api/admin/cleanup/run`
+  - optional body `{ "fullVacuum": true }` for explicit one-time full `VACUUM`.
+
 ## iPhone Test URL
 - `http://192.168.35.73:4000/api/equipment/latest`
 
@@ -176,6 +202,7 @@ npm run replay:fixtures
 - `PATCH /api/settings/device/:deviceId`
 - `GET /api/stream/events` (SSE)
 - `POST /api/admin/scrape/once` (requires `x-debug-token`)
+- `POST /api/admin/cleanup/run` (requires `x-debug-token`)
 - `GET /api/debug/snapshots/latest` (requires `x-debug-token`)
 - `GET /api/debug/parse-errors` (requires `x-debug-token`)
 

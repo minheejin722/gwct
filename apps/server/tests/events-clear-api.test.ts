@@ -107,6 +107,11 @@ describe("events history clear api", () => {
           broadcasts.push({ eventName, payload });
         },
       } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
     });
 
     const before = await app.inject({ method: "GET", url: "/api/events?limit=200" });
@@ -163,6 +168,11 @@ describe("events history clear api", () => {
       sseHub: {
         broadcast() {
           // no-op
+        },
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
         },
       } as any,
     });

@@ -31,6 +31,23 @@ export interface EventHistoryClearResult {
   notificationLogs: number;
 }
 
+export interface TransientRetentionCleanupResult {
+  rawSnapshots: number;
+  parseErrors: number;
+  notificationLogs: number;
+  scrapeRuns: number;
+  detachedRawSnapshotRunRefs: number;
+  detachedParseErrorRunRefs: number;
+}
+
+export interface SnapshotHistoryTrimResult {
+  vesselScheduleItems: number;
+  craneStatuses: number;
+  equipmentLoginStatuses: number;
+  ytCountSnapshots: number;
+  weatherNoticeSnapshots: number;
+}
+
 export class Repository {
   async startScrapeRun(source: SourceId, url: string, mode: "live" | "fixture") {
     return prisma.scrapeRun.create({
@@ -532,6 +549,321 @@ export class Repository {
       weatherAlertEvents: weatherAlertEvents.count,
       notificationLogs: notificationLogs.count,
     };
+  }
+
+  async cleanupTransientData(cutoff: Date): Promise<TransientRetentionCleanupResult> {
+    const rawSnapshots = await prisma.rawSnapshot.deleteMany({
+      where: {
+        fetchedAt: {
+          lt: cutoff,
+        },
+      },
+    });
+
+    const parseErrors = await prisma.parseError.deleteMany({
+      where: {
+        happenedAt: {
+          lt: cutoff,
+        },
+      },
+    });
+
+    const notificationLogs = await prisma.notificationLog.deleteMany({
+      where: {
+        sentAt: {
+          lt: cutoff,
+        },
+      },
+    });
+
+    const runsToDelete = await prisma.scrapeRun.findMany({
+      where: {
+        finishedAt: {
+          not: null,
+          lt: cutoff,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!runsToDelete.length) {
+      return {
+        rawSnapshots: rawSnapshots.count,
+        parseErrors: parseErrors.count,
+        notificationLogs: notificationLogs.count,
+        scrapeRuns: 0,
+        detachedRawSnapshotRunRefs: 0,
+        detachedParseErrorRunRefs: 0,
+      };
+    }
+
+    const runIds = runsToDelete.map((row) => row.id);
+    const detachedRawSnapshotRunRefs = await prisma.rawSnapshot.updateMany({
+      where: {
+        runId: {
+          in: runIds,
+        },
+      },
+      data: {
+        runId: null,
+      },
+    });
+    const detachedParseErrorRunRefs = await prisma.parseError.updateMany({
+      where: {
+        runId: {
+          in: runIds,
+        },
+      },
+      data: {
+        runId: null,
+      },
+    });
+
+    const scrapeRuns = await prisma.scrapeRun.deleteMany({
+      where: {
+        id: {
+          in: runIds,
+        },
+      },
+    });
+
+    return {
+      rawSnapshots: rawSnapshots.count,
+      parseErrors: parseErrors.count,
+      notificationLogs: notificationLogs.count,
+      scrapeRuns: scrapeRuns.count,
+      detachedRawSnapshotRunRefs: detachedRawSnapshotRunRefs.count,
+      detachedParseErrorRunRefs: detachedParseErrorRunRefs.count,
+    };
+  }
+
+  async trimSnapshotHistory(keepSeenAtGroupsPerSource = 2): Promise<SnapshotHistoryTrimResult> {
+    const keepCount = Math.max(1, Math.trunc(keepSeenAtGroupsPerSource));
+
+    const vesselScheduleItems = await this.trimVesselScheduleItemHistory(keepCount);
+    const craneStatuses = await this.trimCraneStatusHistory(keepCount);
+    const equipmentLoginStatuses = await this.trimEquipmentLoginStatusHistory(keepCount);
+    const ytCountSnapshots = await this.trimYtCountSnapshotHistory(keepCount);
+    const weatherNoticeSnapshots = await this.trimWeatherNoticeSnapshotHistory(keepCount);
+
+    return {
+      vesselScheduleItems,
+      craneStatuses,
+      equipmentLoginStatuses,
+      ytCountSnapshots,
+      weatherNoticeSnapshots,
+    };
+  }
+
+  async runIncrementalVacuum(pageCount: number): Promise<void> {
+    const pages = Math.max(1, Math.trunc(pageCount));
+    await prisma.$executeRawUnsafe(`PRAGMA incremental_vacuum(${pages})`);
+  }
+
+  async runFullVacuum(): Promise<void> {
+    await prisma.$executeRawUnsafe("VACUUM");
+  }
+
+  private async trimVesselScheduleItemHistory(keepCount: number): Promise<number> {
+    const sources = await prisma.vesselScheduleItem.findMany({
+      distinct: ["source"],
+      select: {
+        source: true,
+      },
+    });
+
+    let deleted = 0;
+    for (const sourceRow of sources) {
+      const staleSeenAt = await prisma.vesselScheduleItem.findMany({
+        where: { source: sourceRow.source },
+        distinct: ["seenAt"],
+        orderBy: {
+          seenAt: "desc",
+        },
+        skip: keepCount,
+        select: {
+          seenAt: true,
+        },
+      });
+
+      if (!staleSeenAt.length) {
+        continue;
+      }
+
+      const result = await prisma.vesselScheduleItem.deleteMany({
+        where: {
+          source: sourceRow.source,
+          seenAt: {
+            in: staleSeenAt.map((row) => row.seenAt),
+          },
+        },
+      });
+      deleted += result.count;
+    }
+
+    return deleted;
+  }
+
+  private async trimCraneStatusHistory(keepCount: number): Promise<number> {
+    const sources = await prisma.craneStatus.findMany({
+      distinct: ["source"],
+      select: {
+        source: true,
+      },
+    });
+
+    let deleted = 0;
+    for (const sourceRow of sources) {
+      const staleSeenAt = await prisma.craneStatus.findMany({
+        where: { source: sourceRow.source },
+        distinct: ["seenAt"],
+        orderBy: {
+          seenAt: "desc",
+        },
+        skip: keepCount,
+        select: {
+          seenAt: true,
+        },
+      });
+
+      if (!staleSeenAt.length) {
+        continue;
+      }
+
+      const result = await prisma.craneStatus.deleteMany({
+        where: {
+          source: sourceRow.source,
+          seenAt: {
+            in: staleSeenAt.map((row) => row.seenAt),
+          },
+        },
+      });
+      deleted += result.count;
+    }
+
+    return deleted;
+  }
+
+  private async trimEquipmentLoginStatusHistory(keepCount: number): Promise<number> {
+    const sources = await prisma.equipmentLoginStatus.findMany({
+      distinct: ["source"],
+      select: {
+        source: true,
+      },
+    });
+
+    let deleted = 0;
+    for (const sourceRow of sources) {
+      const staleSeenAt = await prisma.equipmentLoginStatus.findMany({
+        where: { source: sourceRow.source },
+        distinct: ["seenAt"],
+        orderBy: {
+          seenAt: "desc",
+        },
+        skip: keepCount,
+        select: {
+          seenAt: true,
+        },
+      });
+
+      if (!staleSeenAt.length) {
+        continue;
+      }
+
+      const result = await prisma.equipmentLoginStatus.deleteMany({
+        where: {
+          source: sourceRow.source,
+          seenAt: {
+            in: staleSeenAt.map((row) => row.seenAt),
+          },
+        },
+      });
+      deleted += result.count;
+    }
+
+    return deleted;
+  }
+
+  private async trimYtCountSnapshotHistory(keepCount: number): Promise<number> {
+    const sources = await prisma.yTCountSnapshot.findMany({
+      distinct: ["source"],
+      select: {
+        source: true,
+      },
+    });
+
+    let deleted = 0;
+    for (const sourceRow of sources) {
+      const staleSeenAt = await prisma.yTCountSnapshot.findMany({
+        where: { source: sourceRow.source },
+        distinct: ["seenAt"],
+        orderBy: {
+          seenAt: "desc",
+        },
+        skip: keepCount,
+        select: {
+          seenAt: true,
+        },
+      });
+
+      if (!staleSeenAt.length) {
+        continue;
+      }
+
+      const result = await prisma.yTCountSnapshot.deleteMany({
+        where: {
+          source: sourceRow.source,
+          seenAt: {
+            in: staleSeenAt.map((row) => row.seenAt),
+          },
+        },
+      });
+      deleted += result.count;
+    }
+
+    return deleted;
+  }
+
+  private async trimWeatherNoticeSnapshotHistory(keepCount: number): Promise<number> {
+    const sources = await prisma.weatherNoticeSnapshot.findMany({
+      distinct: ["source"],
+      select: {
+        source: true,
+      },
+    });
+
+    let deleted = 0;
+    for (const sourceRow of sources) {
+      const staleSeenAt = await prisma.weatherNoticeSnapshot.findMany({
+        where: { source: sourceRow.source },
+        distinct: ["seenAt"],
+        orderBy: {
+          seenAt: "desc",
+        },
+        skip: keepCount,
+        select: {
+          seenAt: true,
+        },
+      });
+
+      if (!staleSeenAt.length) {
+        continue;
+      }
+
+      const result = await prisma.weatherNoticeSnapshot.deleteMany({
+        where: {
+          source: sourceRow.source,
+          seenAt: {
+            in: staleSeenAt.map((row) => row.seenAt),
+          },
+        },
+      });
+      deleted += result.count;
+    }
+
+    return deleted;
   }
 
   async registerDevice(input: DeviceRegistration) {

@@ -15,10 +15,12 @@ async function main() {
   runtime.app.log.info({ port }, "GWCT monitor server started");
 
   await runtime.scheduler.start();
+  runtime.cleanupScheduler.start();
 
   const shutdown = async (signal: string) => {
     runtime.app.log.info({ signal }, "shutting down");
     runtime.scheduler.stop();
+    runtime.cleanupScheduler.stop();
     await runtime.browserPool.close();
     await runtime.app.close();
     await prisma.$disconnect();

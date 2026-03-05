@@ -9,6 +9,7 @@ import { uid } from "../lib/id.js";
 import type { Repository } from "../db/repository.js";
 import type { MonitorService } from "../services/monitorService.js";
 import type { SseHub } from "../lib/sse.js";
+import type { DataRetentionService } from "../services/cleanup/service.js";
 import { env } from "../config/env.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
 import { loadGcLatestSnapshot } from "../services/gc/latestStore.js";
@@ -26,6 +27,7 @@ interface RouteDeps {
   repo: Repository;
   monitorService: MonitorService;
   sseHub: SseHub;
+  cleanupService: DataRetentionService;
 }
 
 function requireDebugToken(request: FastifyRequest, reply: FastifyReply): boolean {
@@ -86,6 +88,10 @@ const MonitorConfigInputSchema = z.object({
   gcRemainingMonitors: z.record(z.string(), GcRemainingMonitorRuleInputSchema).optional(),
   equipmentMonitor: EquipmentMonitorInputSchema.optional(),
   yeosuPilotageMonitor: YeosuPilotageMonitorInputSchema.optional(),
+});
+
+const CleanupRunInputSchema = z.object({
+  fullVacuum: z.boolean().optional(),
 });
 
 function toLegacyGcThresholdPayload(settings: Awaited<ReturnType<typeof loadMonitorSettings>>) {
@@ -653,6 +659,28 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     });
 
     return { ok: true, all: true };
+  });
+
+  app.post("/api/admin/cleanup/run", async (request, reply) => {
+    if (!requireDebugToken(request, reply)) {
+      return;
+    }
+
+    const parsed = CleanupRunInputSchema.safeParse(request.body || {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const result = await deps.cleanupService.runCleanupOnce({
+      trigger: "manual",
+      force: true,
+      manualFullVacuum: parsed.data.fullVacuum === true,
+    });
+
+    return {
+      ok: true,
+      result,
+    };
   });
 
   app.get("/api/debug/snapshots/latest", async (request, reply) => {

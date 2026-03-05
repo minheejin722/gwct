@@ -58,26 +58,33 @@ export class MonitorService {
     const mode = options.mode || env.MODE;
     const run = await this.repo.startScrapeRun(sourceDef.source, sourceDef.url, mode);
     const started = Date.now();
+    let fetchResult: Awaited<ReturnType<HtmlFetcher["fetch"]>> | null = null;
+    let htmlHash: string | null = null;
+    let rawSnapshotPersisted = false;
 
     try {
-      const fetchResult = await this.fetcher.fetch(sourceDef.source, sourceDef.url, {
+      fetchResult = await this.fetcher.fetch(sourceDef.source, sourceDef.url, {
         mode,
         fixtureSet: options.fixtureSet,
       });
 
-      const htmlHash = sha256(fetchResult.html);
-      await this.repo.saveRawSnapshot({
-        source: sourceDef.source,
-        url: fetchResult.url,
-        html: fetchResult.html,
-        htmlHash,
-        textContent: undefined,
-        metadata: fetchResult.metadata,
-        runId: run.id,
-      });
+      htmlHash = sha256(fetchResult.html);
 
       const seenAt = new Date().toISOString();
       const bundle = parseBySource(sourceDef.source, fetchResult.html, seenAt);
+
+      if (this.shouldPersistRawSnapshot(bundle.diagnostics.length, false)) {
+        await this.repo.saveRawSnapshot({
+          source: sourceDef.source,
+          url: fetchResult.url,
+          html: fetchResult.html,
+          htmlHash,
+          textContent: undefined,
+          metadata: fetchResult.metadata,
+          runId: run.id,
+        });
+        rawSnapshotPersisted = true;
+      }
 
       if (sourceDef.source === "gwct_schedule_list" && fetchResult.metadata.scheduleRowsMeta) {
         this.logger.debug(
@@ -134,6 +141,29 @@ export class MonitorService {
       );
     } catch (error) {
       const message = String((error as Error)?.message || error);
+
+      if (fetchResult && htmlHash && !rawSnapshotPersisted && this.shouldPersistRawSnapshot(0, true)) {
+        try {
+          await this.repo.saveRawSnapshot({
+            source: sourceDef.source,
+            url: fetchResult.url,
+            html: fetchResult.html,
+            htmlHash,
+            textContent: undefined,
+            metadata: fetchResult.metadata,
+            runId: run.id,
+          });
+        } catch (rawPersistError) {
+          this.logger.warn(
+            {
+              source: sourceDef.source,
+              err: String((rawPersistError as Error)?.message || rawPersistError),
+            },
+            "failed to persist raw snapshot in failure path",
+          );
+        }
+      }
+
       await this.repo.saveParseError({
         source: sourceDef.source,
         parserName: "runSourceOnce",
@@ -141,15 +171,31 @@ export class MonitorService {
         diagnostics: {
           stack: (error as Error)?.stack,
         },
+        htmlHash: htmlHash || undefined,
         runId: run.id,
       });
       await this.repo.finishScrapeRun(run.id, {
         success: false,
         durationMs: Date.now() - started,
+        htmlHash: htmlHash || undefined,
+        statusCode: fetchResult?.statusCode ?? null,
         errorMessage: message,
       });
       this.logger.error({ source: sourceDef.source, err: message }, "scrape source failed");
     }
+  }
+
+  private shouldPersistRawSnapshot(diagnosticsCount: number, failed: boolean): boolean {
+    if (env.rawSnapshotPersist === "all") {
+      return true;
+    }
+    if (env.rawSnapshotPersist === "off") {
+      return false;
+    }
+    if (failed) {
+      return true;
+    }
+    return diagnosticsCount > 0;
   }
 
   private async persistGcLatestSnapshot(cranes: ReturnType<typeof parseBySource>["cranes"], capturedAt: string, sourceUrl: string): Promise<void> {
