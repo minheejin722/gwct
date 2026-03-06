@@ -473,7 +473,7 @@ export function diffEquipmentLogins(
           source,
           dedupeKey: `equipment:login:${row.equipmentId}:${newOperator}`,
           title: `장비 로그인 (${row.equipmentId})`,
-          message: `${row.equipmentId} 기사 ${newOperator} 로그인`,
+          message: `${row.equipmentId} Cabin ${newOperator} 로그인`,
           beforeValue: oldOperator,
           afterValue: newOperator,
           payload: {
@@ -493,8 +493,8 @@ export function diffEquipmentLogins(
           type: "EQUIPMENT_OPERATOR_CHANGED",
           source,
           dedupeKey: `equipment:operator:${row.equipmentId}:${newOperator}`,
-          title: `장비 기사 변경 (${row.equipmentId})`,
-          message: `${row.equipmentId} 기사 ${oldOperator} -> ${newOperator}`,
+          title: `장비 Cabin 변경 (${row.equipmentId})`,
+          message: `${row.equipmentId} Cabin ${oldOperator} -> ${newOperator}`,
           beforeValue: oldOperator,
           afterValue: newOperator,
           payload: {
@@ -514,8 +514,8 @@ export function diffEquipmentLogins(
           type: "EQUIPMENT_HELPER_CHANGED",
           source,
           dedupeKey: `equipment:helper:${row.equipmentId}:${newHelper}`,
-          title: `장비 보조 변경 (${row.equipmentId})`,
-          message: `${row.equipmentId} 보조 ${oldHelper} -> ${newHelper}`,
+          title: `장비 Under 변경 (${row.equipmentId})`,
+          message: `${row.equipmentId} Under ${oldHelper} -> ${newHelper}`,
           beforeValue: oldHelper,
           afterValue: newHelper,
           payload: {
@@ -644,8 +644,8 @@ export function detectGcEquipmentFocusEvents(
     if (!before.driverName && after.driverName) {
       pushGcEvent(
         "gc_driver_login",
-        `GC${gc} 기사 로그인`,
-        `GC${gc} 기사 ${after.driverName} 로그인`,
+        `GC${gc} Cabin 로그인`,
+        `GC${gc} Cabin ${after.driverName} 로그인`,
         null,
         after.driverName,
         {
@@ -656,8 +656,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.driverName && !after.driverName) {
       pushGcEvent(
         "gc_driver_logout",
-        `GC${gc} 기사 로그아웃`,
-        `GC${gc} 기사 ${before.driverName} 로그아웃`,
+        `GC${gc} Cabin 로그아웃`,
+        `GC${gc} Cabin ${before.driverName} 로그아웃`,
         before.driverName,
         null,
         {
@@ -668,8 +668,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.driverName && after.driverName && before.driverName !== after.driverName) {
       pushGcEvent(
         "gc_driver_changed",
-        `GC${gc} 기사 변경`,
-        `GC${gc} 기사 ${before.driverName} -> ${after.driverName}`,
+        `GC${gc} Cabin 변경`,
+        `GC${gc} Cabin ${before.driverName} -> ${after.driverName}`,
         before.driverName,
         after.driverName,
         {
@@ -682,8 +682,8 @@ export function detectGcEquipmentFocusEvents(
     if (!before.hkName && after.hkName) {
       pushGcEvent(
         "gc_hk_login",
-        `GC${gc} HK 로그인`,
-        `GC${gc} HK ${after.hkName} 로그인`,
+        `GC${gc} Under 로그인`,
+        `GC${gc} Under ${after.hkName} 로그인`,
         null,
         after.hkName,
         {
@@ -694,8 +694,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.hkName && !after.hkName) {
       pushGcEvent(
         "gc_hk_logout",
-        `GC${gc} HK 로그아웃`,
-        `GC${gc} HK ${before.hkName} 로그아웃`,
+        `GC${gc} Under 로그아웃`,
+        `GC${gc} Under ${before.hkName} 로그아웃`,
         before.hkName,
         null,
         {
@@ -706,8 +706,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.hkName && after.hkName && before.hkName !== after.hkName) {
       pushGcEvent(
         "gc_hk_changed",
-        `GC${gc} HK 변경`,
-        `GC${gc} HK ${before.hkName} -> ${after.hkName}`,
+        `GC${gc} Under 변경`,
+        `GC${gc} Under ${before.hkName} -> ${after.hkName}`,
         before.hkName,
         after.hkName,
         {

@@ -13,13 +13,13 @@ import type { DataRetentionService } from "../services/cleanup/service.js";
 import { env } from "../config/env.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
 import { loadGcLatestSnapshot } from "../services/gc/latestStore.js";
-import { normalizeCraneLiveRows } from "../services/gc/liveRows.js";
 import {
   countSupportEquipmentLogins,
   countTrackedVessels,
   countWorkingGcCranes,
 } from "../services/dashboard/summary.js";
 import { loadEquipmentLatestSnapshot } from "../services/equipment/latestStore.js";
+import { buildGcCraneLiveRows } from "../services/gc/workState.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
 
@@ -151,10 +151,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/health", async () => ({ ok: true, time: new Date().toISOString() }));
 
   app.get("/api/dashboard/summary", async () => {
-    const [settings, scheduleLatest, gcLatest, equipmentRows, ytSnapshot, weather, meta] = await Promise.all([
+    const [settings, scheduleLatest, gcLatest, equipmentLatest, equipmentRows, ytSnapshot, weather, meta] = await Promise.all([
       loadMonitorSettings(),
       loadScheduleFocusSnapshot(),
       loadGcLatestSnapshot(),
+      loadEquipmentLatestSnapshot(),
       deps.repo.getLatestEquipmentStatuses("gwct_equipment_status"),
       deps.repo.getLatestYtSnapshot("gwct_equipment_status"),
       deps.repo.getLatestWeatherSnapshot("ys_forecast"),
@@ -164,7 +165,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     return {
       lastUpdatedAt: meta.lastUpdatedAt,
       trackedVesselCount: countTrackedVessels(settings.gwctEtaMonitor.trackingCount, scheduleLatest),
-      workingCraneCount: countWorkingGcCranes(gcLatest),
+      workingCraneCount: countWorkingGcCranes(gcLatest, equipmentLatest),
       supportEquipmentLoginCount: countSupportEquipmentLogins(equipmentRows),
       ytLoggedInCount: ytSnapshot?.totalLoggedIn ?? 0,
       weatherState: weather?.suspensionState ?? "none",
@@ -236,9 +237,23 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/cranes/live", async () => {
-    const rows = normalizeCraneLiveRows(await deps.repo.getLatestCraneStatuses("gwct_work_status"));
+    const [gcLatest, equipmentLatest, workStatusRows] = await Promise.all([
+      loadGcLatestSnapshot(),
+      loadEquipmentLatestSnapshot(),
+      deps.repo.getLatestCraneStatuses("gwct_work_status"),
+    ]);
+
+    if (!gcLatest && !equipmentLatest && workStatusRows.length === 0) {
+      return {
+        source: "gwct_gc_remaining",
+        count: 0,
+        items: [],
+      };
+    }
+
+    const rows = buildGcCraneLiveRows(gcLatest, equipmentLatest, workStatusRows);
     return {
-      source: "gwct_work_status",
+      source: "gwct_gc_remaining",
       count: rows.length,
       items: rows,
     };

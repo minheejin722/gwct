@@ -17,3 +17,8 @@
 
 ## 2026-03-04
 - In npm workspace monorepos where `@gwct/shared` exports TS source directly, NodeNext-style internal `.js` import suffixes can break Expo Metro resolution; keep Node entry intact and add a `react-native` conditional export to a native entry file that uses extensionless internal imports.
+
+## 2026-03-06
+- For GWCT equipment GC rows, do not infer helper/under-man from an `HK` prefix. The parser must treat the first name line as driver and the second non-empty line as helper because the live page can show a plain helper name with no `HK(...)` marker.
+- When the user corrects operational terminology, change user-facing labels/messages end-to-end (`server event text + mobile UI`) while preserving internal field names and event types unless the data contract itself needs to change.
+- For GC181~190 operational state, do not equate `remainingSubtotal > 0` with active work. If subtotal remains but Cabin/Under/login are all absent in equipment status, classify the crane as `작업 예정` instead of `작업중`.

@@ -77,20 +77,20 @@ export default function EquipmentScreen() {
           상태: {status} · Low {config.data?.ytThresholdLow ?? "-"} / Recover {config.data?.ytThresholdRecover ?? "-"}
         </Text>
         <Text style={styles.meta}>
-          감시설정: YT {config.data?.ytEnabled ? "ON" : "OFF"} / GC 기사-HK {config.data?.gcStaffEnabled ? "ON" : "OFF"}
+          감시설정: YT {config.data?.ytEnabled ? "ON" : "OFF"} / GC Cabin-Under {config.data?.gcStaffEnabled ? "ON" : "OFF"}
         </Text>
         <Text style={styles.meta}>마지막 업데이트: {fmtTime(latest.data?.capturedAt)}</Text>
       </View>
 
-      <ScreenLinkCard href="/monitor-equipment" title="장비 감시 설정" subtitle="YT 기준값 + GC 기사/HK 감시 Confirm/Cancel" />
+      <ScreenLinkCard href="/monitor-equipment" title="장비 감시 설정" subtitle="YT 기준값 + GC Cabin/Under 감시 Confirm/Cancel" />
 
       {(latest.data?.gcStates || []).map((gc) => {
         const hasStopReason = Boolean(gc.stopReason);
         return (
           <View key={gc.gcNo} style={styles.gcCard}>
             <Text style={styles.gcTitle}>GC{gc.gcNo}</Text>
-            <Text style={styles.row}>기사: {gc.driverName || "-"}</Text>
-            <Text style={styles.row}>HK: {gc.hkName || "-"}</Text>
+            <Text style={styles.row}>Cabin: {gc.driverName || "-"}</Text>
+            <Text style={styles.row}>Under: {gc.hkName || "-"}</Text>
             <Text style={styles.row}>로그인: {gc.loginTime || "-"}</Text>
             <Text style={[styles.row, hasStopReason ? styles.stopReason : styles.normalReason]}>
               중단사유: {gc.stopReason || "-"}

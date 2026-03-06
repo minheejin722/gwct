@@ -604,3 +604,59 @@
     - `tests/cleanup-service.test.ts`
     - `tests/cleanup-scheduler.test.ts`
     - `tests/cleanup-route.test.ts`
+
+## GC Helper Parsing Plan (2026-03-06)
+- [x] Inspect current GWCT equipment parser and confirm helper detection currently depends on `HK` prefix.
+- [x] Update the plan log and capture the user correction in `tasks/lessons.md`.
+- [x] Fix parser semantics so GC operator cell maps first line to driver and second non-empty line to helper regardless of `HK` prefix.
+- [x] Add regression coverage for a GC row whose helper line is a plain name.
+- [x] Run targeted verification and record the review.
+
+## GC Helper Parsing Review
+- Root cause:
+  - `parseOperatorCellHtml()` only promoted a secondary line to `helperName` when that line matched `/HK/i`.
+  - On the live GWCT equipment page, GC 기사란 semantics are positional, not prefix-based: top line is the driver and the lower line is the under-man/helper even when it is just a plain name.
+- Fix:
+  - Updated the parser to keep `operatorName` as the first non-empty line and `helperName` as the first non-empty subsequent line, with the single-line `HK...` helper-only fallback preserved.
+  - Added a regression test for `GC182` with `박종철<br>이홍권`.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/equipment-focus.test.ts` ✅
+
+## Cabin/Under Terminology Plan (2026-03-06)
+- [x] Inspect current user-facing uses of `기사`/`HK` across server event text and mobile UI.
+- [x] Record the terminology correction in `tasks/lessons.md`.
+- [x] Update user-facing strings to `Cabin`/`Under` without changing internal field names or event types.
+- [x] Run targeted verification and record the review.
+
+## Cabin/Under Terminology Review
+- Scope:
+  - Updated server GC/equipment event titles and messages.
+  - Updated mobile Equipment, YT, Alerts, Settings, Monitor Menu, and Equipment Monitor screen labels/subtitles.
+- Compatibility:
+  - Internal names such as `driverName`, `hkName`, and `gcStaff` remain unchanged for API and state compatibility.
+- Validation:
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/equipment-focus.test.ts tests/semantic-dedupe.test.ts` ✅
+
+## GC Scheduled State Plan (2026-03-06)
+- [x] Inspect current GC remaining, equipment latest, dashboard summary, and Crane Status UI paths.
+- [x] Record the domain correction in `tasks/lessons.md`.
+- [x] Implement a shared server-side GC work-state derivation: `active` vs `scheduled` vs `idle` vs `unknown`.
+- [x] Update `/api/cranes/live` and dashboard summary to use the same GC work-state logic.
+- [x] Update the mobile Crane Status UI to show `작업 예정` distinctly.
+- [x] Run targeted verification and record the review.
+
+## GC Scheduled State Review
+- Rule implemented:
+  - `remainingSubtotal > 0` and Cabin/Under/login present => `active` (`작업중`)
+  - `remainingSubtotal > 0` and Cabin/Under/login all absent => `scheduled` (`작업 예정`)
+  - `remainingSubtotal <= 0` => `idle`
+  - subtotal unavailable => `unknown`
+- Scope:
+  - Added server GC work-state helper and applied it to `/api/cranes/live`.
+  - Updated dashboard `workingCraneCount` to count only actively staffed GC rows, not scheduled rows.
+  - Updated mobile Crane Status cards to display the derived state badge and scheduled-note text.
+- Validation:
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-work-state.test.ts tests/dashboard-summary.test.ts tests/crane-live-rows.test.ts` ✅

@@ -1,6 +1,8 @@
 import type { EquipmentLoginStatus } from "@gwct/shared";
+import type { EquipmentFocusSnapshot } from "../equipment/latestStore.js";
 import { normalizeDriverNameForEquipment, normalizeOptionalEquipmentText } from "../equipment/ytUnits.js";
 import type { GcRemainingItem, GcRemainingSnapshot } from "../gc/latestStore.js";
+import { deriveGcWorkState } from "../gc/workState.js";
 import type { ScheduleFocusSnapshot } from "../scheduleFocus/latestStore.js";
 
 const LOGIN_TIME_PATTERN = /(?:\d{1,2}[./-]\d{1,2}\s+)?\d{1,2}:\d{2}(?::\d{2})?/;
@@ -18,22 +20,29 @@ export function countTrackedVessels(
   return Math.min(normalizedTracking, actualCurrentWatchWindowLength);
 }
 
-// Working GC rule: GC181~GC190 with non-placeholder subtotal and subtotal > 0.
-export function isWorkingGcRemainingItem(item: GcRemainingItem): boolean {
+function findGcEquipmentState(snapshot: EquipmentFocusSnapshot | null, gc: number) {
+  return snapshot?.gcStates.find((row) => row.gcNo === gc) || null;
+}
+
+// Working GC rule: GC181~GC190 with remaining work and assigned crew/login.
+export function isWorkingGcRemainingItem(
+  item: GcRemainingItem,
+  equipmentSnapshot: EquipmentFocusSnapshot | null = null,
+): boolean {
   if (item.gc < 181 || item.gc > 190) {
     return false;
   }
-  if (item.remainingSubtotal === null) {
-    return false;
-  }
-  return item.remainingSubtotal > 0;
+  return deriveGcWorkState(item.remainingSubtotal, findGcEquipmentState(equipmentSnapshot, item.gc)) === "active";
 }
 
-export function countWorkingGcCranes(snapshot: GcRemainingSnapshot | null): number {
+export function countWorkingGcCranes(
+  snapshot: GcRemainingSnapshot | null,
+  equipmentSnapshot: EquipmentFocusSnapshot | null = null,
+): number {
   if (!snapshot) {
     return 0;
   }
-  return snapshot.items.filter((item) => isWorkingGcRemainingItem(item)).length;
+  return snapshot.items.filter((item) => isWorkingGcRemainingItem(item, equipmentSnapshot)).length;
 }
 
 export function isSupportEquipmentType(equipmentId: string): boolean {

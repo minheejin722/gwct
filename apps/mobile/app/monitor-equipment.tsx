@@ -115,7 +115,7 @@ export default function MonitorEquipmentScreen() {
     try {
       await saveEquipmentConfig({ gcStaff: { enabled } });
       await refresh();
-      Alert.alert("Saved", `GC driver/HK monitor is now ${enabled ? "enabled" : "disabled"}.`);
+      Alert.alert("Saved", `GC Cabin/Under monitor is now ${enabled ? "enabled" : "disabled"}.`);
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -169,7 +169,7 @@ export default function MonitorEquipmentScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>GC180~GC190 Driver/HK Monitor</Text>
+        <Text style={styles.sectionTitle}>GC180~GC190 Cabin/Under Monitor</Text>
         <Text style={styles.meta}>Status: {data?.gcStaff.enabled ? "ACTIVE" : "INACTIVE"}</Text>
         <View style={styles.buttonRow}>
           <Pressable
@@ -193,7 +193,7 @@ export default function MonitorEquipmentScreen() {
         <Text style={styles.sectionTitle}>Latest GC180~190 State</Text>
         {(data?.gcStates || []).map((row) => (
           <Text key={row.gcNo} style={styles.row}>
-            GC{row.gcNo} Driver={row.driverName || "-"} HK={row.hkName || "-"} Login={row.loginTime || "-"} Stop={row.stopReason || "-"}
+            GC{row.gcNo} Cabin={row.driverName || "-"} Under={row.hkName || "-"} Login={row.loginTime || "-"} Stop={row.stopReason || "-"}
           </Text>
         ))}
       </View>

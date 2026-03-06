@@ -36,7 +36,7 @@ export default function SettingsScreen() {
           YT Count: {data?.config.equipmentMonitor.yt.enabled ? "ON" : "OFF"} (threshold {data?.config.equipmentMonitor.yt.threshold ?? 0})
         </Text>
         <Text style={styles.summaryText}>
-          GC Driver/HK: {data?.config.equipmentMonitor.gcStaff.enabled ? "ON" : "OFF"}
+          GC Cabin/Under: {data?.config.equipmentMonitor.gcStaff.enabled ? "ON" : "OFF"}
         </Text>
         <Text style={styles.summaryText}>
           Yeosu Pilotage: {data?.config.yeosuPilotageMonitor.enabled ? "ON" : "OFF"}
@@ -46,7 +46,7 @@ export default function SettingsScreen() {
       <View style={styles.links}>
         <ScreenLinkCard href="/monitor-gwct-eta" title="GWCT ETA Monitor" subtitle="Set N(1~11), then Confirm/Cancel" />
         <ScreenLinkCard href="/monitor-gc-remaining" title="GC Remaining" subtitle="Per-GC threshold and enable/disable" />
-        <ScreenLinkCard href="/monitor-equipment" title="Equipment Monitor" subtitle="YT threshold + GC Driver/HK on/off" />
+        <ScreenLinkCard href="/monitor-equipment" title="Equipment Monitor" subtitle="YT threshold + GC Cabin/Under on/off" />
         <ScreenLinkCard href="/monitor-yeosu" title="Yeosu Pilotage" subtitle="Pilotage suspension monitor on/off" />
       </View>
     </ScrollView>

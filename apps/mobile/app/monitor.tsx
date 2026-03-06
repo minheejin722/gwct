@@ -24,7 +24,7 @@ export default function MonitorMenuScreen() {
       <ScreenLinkCard
         href="/monitor-equipment"
         title="Equipment Monitor"
-        subtitle="Configure YT count and GC180~190 driver/HK monitoring."
+        subtitle="Configure YT count and GC180~190 Cabin/Under monitoring."
       />
       <ScreenLinkCard
         href="/monitor-yeosu"

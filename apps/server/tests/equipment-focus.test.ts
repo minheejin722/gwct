@@ -59,6 +59,22 @@ describe("equipment focus parser and event rules", () => {
     expect(bundle.yt?.totalLoggedIn).toBe(2);
   });
 
+  it("treats the second GC name line as helper even without HK prefix", () => {
+    const html = `<html><body>
+    <table class="AA_list">
+      <tr><th>장비</th><th>기사</th><th>로그인</th><th>중단사유</th></tr>
+      <tr><td>GC182</td><td>박종철<br>이홍권</td><td>03-01 20:20</td><td></td></tr>
+    </table>
+    </body></html>`;
+
+    const bundle = parseGwctEquipmentStatus(html, "2026-03-01T12:00:00.000Z", "gwct_equipment_status");
+    const gc182 = bundle.equipment.find((row) => row.equipmentId === "GC182");
+
+    expect(gc182?.operatorName).toBe("박종철");
+    expect(gc182?.helperName).toBe("이홍권");
+    expect(gc182?.loginText).toBe("03-01 20:20");
+  });
+
   it("applies YT threshold state transitions with baseline-first behavior", () => {
     const baseConfig: EquipmentYtMonitorConfig = {
       enabled: true,

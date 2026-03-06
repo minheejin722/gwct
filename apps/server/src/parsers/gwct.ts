@@ -101,7 +101,7 @@ function parseOperatorCellHtml(html: string): { operator: string | null; helper:
   }
 
   const first = lines[0] || null;
-  const hkLine = lines.slice(1).find((line) => /HK/i.test(line));
+  const helperLine = lines.slice(1).find((line) => normalizeOptionalText(line) !== null) || null;
 
   if (lines.length === 1 && first && /HK/i.test(first)) {
     return {
@@ -112,7 +112,7 @@ function parseOperatorCellHtml(html: string): { operator: string | null; helper:
 
   return {
     operator: normalizeDriverName(first),
-    helper: normalizeOptionalText(hkLine || null),
+    helper: normalizeOptionalText(helperLine),
   };
 }
 

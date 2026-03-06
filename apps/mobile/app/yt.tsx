@@ -116,7 +116,7 @@ export default function YtScreen() {
                 </Text>
               </View>
             </View>
-            <Text style={styles.row}>기사: {unit.driverName || "-"}</Text>
+            <Text style={styles.row}>Cabin: {unit.driverName || "-"}</Text>
             <Text style={styles.row}>로그인: {unit.loginTime || "-"}</Text>
             <Text style={[styles.row, showReason ? styles.reason : null]}>중단사유: {unit.stopReason || "-"}</Text>
           </View>

@@ -194,9 +194,9 @@ export default function AlertsScreen() {
           <Text style={styles.summary}>{item.title}</Text>
           <Text style={styles.message}>{item.message}</Text>
           {item.type === "yt_unit_status_changed" ? (
-            <>
+              <>
               <Text style={styles.debug}>YT: {item.payload?.ytNo || "-"}</Text>
-              <Text style={styles.debug}>기사: {item.payload?.driverName || "-"}</Text>
+              <Text style={styles.debug}>Cabin: {item.payload?.driverName || "-"}</Text>
               <Text style={styles.debug}>
                 전이: {item.payload?.previousState || "-"} {"->"} {item.payload?.currentState || "-"}
               </Text>

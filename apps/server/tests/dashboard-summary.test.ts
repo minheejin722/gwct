@@ -1,8 +1,6 @@
-﻿import { describe, expect, it } from "vitest";
-import type { EquipmentLoginStatus } from "@gwct/shared";
 import { formatDashboardMetric } from "@gwct/shared";
-import type { GcRemainingSnapshot } from "../src/services/gc/latestStore.js";
-import type { ScheduleFocusSnapshot } from "../src/services/scheduleFocus/latestStore.js";
+import type { EquipmentLoginStatus } from "@gwct/shared";
+import { describe, expect, it } from "vitest";
 import {
   countSupportEquipmentLogins,
   countTrackedVessels,
@@ -10,6 +8,9 @@ import {
   isValidEquipmentLoginTime,
   isWorkingGcRemainingItem,
 } from "../src/services/dashboard/summary.js";
+import type { EquipmentFocusSnapshot } from "../src/services/equipment/latestStore.js";
+import type { GcRemainingSnapshot } from "../src/services/gc/latestStore.js";
+import type { ScheduleFocusSnapshot } from "../src/services/scheduleFocus/latestStore.js";
 
 function equipmentRow(
   equipmentId: string,
@@ -62,22 +63,51 @@ describe("dashboard summary aggregator", () => {
     expect(countTrackedVessels(0, scheduleSnapshot)).toBe(0);
   });
 
-  it("counts only working GC181~GC190 cranes", () => {
+  it("counts only actively staffed GC181~GC190 cranes as working", () => {
     const gcSnapshot: GcRemainingSnapshot = {
       source: "gwct_gc_remaining",
       sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=F&s=A",
       capturedAt: "2026-03-04T04:00:00.000Z",
       items: [
         { gc: 181, dischargeRemaining: 3, loadRemaining: 2, remainingSubtotal: 5 },
-        { gc: 182, dischargeRemaining: 0, loadRemaining: 0, remainingSubtotal: 0 },
-        { gc: 183, dischargeRemaining: null, loadRemaining: null, remainingSubtotal: null },
+        { gc: 182, dischargeRemaining: 5, loadRemaining: 1, remainingSubtotal: 6 },
+        { gc: 183, dischargeRemaining: 0, loadRemaining: 0, remainingSubtotal: 0 },
+        { gc: 184, dischargeRemaining: null, loadRemaining: null, remainingSubtotal: null },
       ],
     };
 
-    expect(isWorkingGcRemainingItem(gcSnapshot.items[0]!)).toBe(true);
-    expect(isWorkingGcRemainingItem(gcSnapshot.items[1]!)).toBe(false);
-    expect(isWorkingGcRemainingItem(gcSnapshot.items[2]!)).toBe(false);
-    expect(countWorkingGcCranes(gcSnapshot)).toBe(1);
+    const equipmentSnapshot: EquipmentFocusSnapshot = {
+      source: "gwct_equipment_status",
+      sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+      capturedAt: "2026-03-04T04:00:00.000Z",
+      ytCount: 0,
+      ytKnown: 0,
+      ytUnits: [],
+      gcStates: [
+        {
+          gcNo: 181,
+          equipmentId: "GC181",
+          driverName: "Kim",
+          hkName: "Lee",
+          loginTime: "03-04 12:00",
+          stopReason: null,
+        },
+        {
+          gcNo: 182,
+          equipmentId: "GC182",
+          driverName: null,
+          hkName: null,
+          loginTime: null,
+          stopReason: null,
+        },
+      ],
+    };
+
+    expect(isWorkingGcRemainingItem(gcSnapshot.items[0]!, equipmentSnapshot)).toBe(true);
+    expect(isWorkingGcRemainingItem(gcSnapshot.items[1]!, equipmentSnapshot)).toBe(false);
+    expect(isWorkingGcRemainingItem(gcSnapshot.items[2]!, equipmentSnapshot)).toBe(false);
+    expect(isWorkingGcRemainingItem(gcSnapshot.items[3]!, equipmentSnapshot)).toBe(false);
+    expect(countWorkingGcCranes(gcSnapshot, equipmentSnapshot)).toBe(1);
   });
 
   it("counts support equipment login only for LEASE/REPAIR/RS/TC/TH with valid driver+loginTime", () => {
