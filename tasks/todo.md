@@ -660,3 +660,16 @@
 - Validation:
   - `npm.cmd run typecheck` ✅
   - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-work-state.test.ts tests/dashboard-summary.test.ts tests/crane-live-rows.test.ts` ✅
+
+## Home Equipment Card Removal Plan (2026-03-06)
+- [x] Confirm the user wants to remove only the home-screen `장비 현황` card shown in the screenshot.
+- [x] Record the clarified scope in `tasks/lessons.md`.
+- [x] Remove the home-screen `장비 현황` card while keeping the underlying screen/feature intact.
+- [x] Run mobile typecheck and record the result.
+
+## Home Equipment Card Removal Review
+- Scope:
+  - Remove only the `장비 현황` card from the home screen.
+  - Keep the Equipment route and related monitoring functionality intact.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
