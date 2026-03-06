@@ -143,6 +143,7 @@ export const YTUnitTransitionKindSchema = z.enum([
   "stopped_to_active",
   "logged_out_to_active",
   "stopped_reason_changed",
+  "driver_changed",
 ]);
 export type YTUnitTransitionKind = z.infer<typeof YTUnitTransitionKindSchema>;
 

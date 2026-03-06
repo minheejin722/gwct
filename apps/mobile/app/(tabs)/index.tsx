@@ -47,6 +47,7 @@ export default function HomeScreen() {
         <ScreenLinkCard href="/monitor" title="모니터링 설정" subtitle="기능별 Confirm/Cancel 및 기준값 설정" />
         <ScreenLinkCard href="/vessels" title="선박 스케줄" subtitle="ETA/ETD 변경, 신규/삭제 확인" />
         <ScreenLinkCard href="/cranes" title="크레인 현황" subtitle="GC 잔량 및 임계치 추적" />
+        <ScreenLinkCard href="/equipment" title="GC Cabin/Under 현황" subtitle="GC180~190 Cabin/Under, 로그인, 중단사유 확인" />
         <ScreenLinkCard href="/yt" title="YT 로그인 수" subtitle="최소 인원 임계치 모니터링" />
         <ScreenLinkCard href="/weather" title="도선 중지 알림" subtitle="배선팀근무 + 대기호출자 기반 중지 감지" />
       </View>

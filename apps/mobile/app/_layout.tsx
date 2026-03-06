@@ -117,7 +117,7 @@ export default function RootLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="vessels" options={{ title: "Vessel Schedule" }} />
       <Stack.Screen name="cranes" options={{ title: "Crane Status" }} />
-      <Stack.Screen name="equipment" options={{ title: "Equipment" }} />
+      <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under 현황" }} />
       <Stack.Screen name="yt" options={{ title: "YT Count" }} />
       <Stack.Screen name="weather" options={{ title: "Pilotage/Weather" }} />
       <Stack.Screen name="monitor" options={{ title: "Monitoring" }} />

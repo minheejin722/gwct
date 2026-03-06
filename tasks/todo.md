@@ -673,3 +673,204 @@
   - Keep the Equipment route and related monitoring functionality intact.
 - Validation:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Crane Status Ordering Plan (2026-03-06)
+- [x] Inspect the current Crane Status screen ordering and badge label mapping.
+- [x] Record the new UI-priority rule in `tasks/lessons.md`.
+- [x] Reorder crane cards by operational priority: `작업중` -> `작업 예정` -> `작업 안함`, with GC number ascending inside each group.
+- [x] Collapse the former `상태 미확인` badge text into `작업 안함` for the Crane Status screen.
+- [x] Run mobile typecheck and record the review.
+
+## Crane Status Ordering Review
+- Scope:
+  - Reordered the Crane Status list on the mobile screen by operational priority instead of raw GC number order.
+  - Collapsed both `idle` and `unknown` into the single user-facing label `작업 안함`.
+- Behavior:
+  - Card order is now `작업중` -> `작업 예정` -> `작업 안함`.
+  - Within each group, cranes remain sorted by GC number ascending.
+  - `작업 안함` uses one consistent badge style regardless of whether the backend state is `idle` or `unknown`.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## GC Cabin/Under Status Screen Plan (2026-03-06)
+- [x] Inspect the existing equipment screen and confirm it already uses `/api/equipment/latest` GC rows.
+- [x] Re-scope the mobile `equipment` screen to a dedicated GC Cabin/Under status view with clear stop-state presentation.
+- [x] Re-add a home entry card for the focused GC Cabin/Under screen without restoring the old duplicated equipment summary.
+- [x] Run mobile typecheck and record the review.
+
+## GC Cabin/Under Status Screen Review
+- Data path:
+  - Reused the existing `/api/equipment/latest` payload and `gcStates` array.
+  - No server schema or endpoint changes were needed.
+- UI changes:
+  - Converted the `equipment` route into a dedicated GC Cabin/Under status screen for GC180~190.
+  - Added explicit state badges derived from existing fields: `중단` when `stopReason` exists, `탑승중` when crew/login data exists without a stop reason, otherwise `미탑승`.
+  - Moved stop reason into a separate highlighted panel so stopped cranes are visually obvious.
+  - Re-added a focused home entry card for the screen instead of restoring the old mixed equipment summary.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## GC Cabin/Under Compact Layout Plan (2026-03-06)
+- [x] Inspect the current GC Cabin/Under card density and confirm the layout is too tall for phone-sized scanning.
+- [x] Record the compact mobile layout rule in `tasks/lessons.md`.
+- [x] Refactor each GC card into dense inline rows for Cabin, Under, login time, and stop reason while keeping stop reasons visually distinct.
+- [x] Run mobile typecheck and record the review.
+
+## GC Cabin/Under Compact Layout Review
+- Layout changes:
+  - Replaced the tall stacked field blocks with dense one-line rows: `Cabin`, `Under`, `로그인`, `중단사유`.
+  - Shrunk card padding, header spacing, badge size, and typography so more GC cards fit on one screen.
+  - Reduced the top summary from a large card to a compact status strip.
+  - Kept stopped rows visually obvious by highlighting only the `중단사유` row instead of using a large separate panel.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## GC Cabin/Under Status Refinement Plan (2026-03-06)
+- [x] Record the refined screen-only filtering, iconography, and sorting rules in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Exclude GC180 from the live GC Cabin/Under screen, compress the layout further into two inline rows, and replace text-only badges with shape-based status marks.
+- [x] Sort visible GCs as `탑승중 -> 중단 -> 미탑승`, keeping GC number ascending inside each group, but preserve plain numeric order when every visible GC is `미탑승`.
+- [x] Run mobile typecheck and record the review.
+
+## GC Cabin/Under Status Refinement Review
+- Scope:
+  - Applied the new rules only to the mobile `GC Cabin/Under 현황` screen.
+  - Conservatively left server-side GC monitoring/event logic unchanged.
+- Behavior:
+  - Excludes `GC180` from the live list and summary so the screen now covers `GC181~190`.
+  - Uses explicit status marks:
+    - `탑승중`: blue circle
+    - `중단`: red triangle
+    - `미탑승`: gray square
+  - Compresses each GC card into two inline rows:
+    - `Cabin <name>   Under <name>`
+    - `로그인 <time>   중단사유 <reason>`
+  - Sorts visible GCs by `탑승중 -> 중단 -> 미탑승`, with GC number ascending inside each group.
+  - Falls back to plain numeric order when every visible GC is `미탑승`.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## GC Cabin/Under Icon-Only Layout Plan (2026-03-06)
+- [x] Record the latest icon-only and alignment correction in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Remove visible status text from the summary and each GC row, enlarge the icons, and tighten the two-column alignment so `Under` and `중단사유` share the same vertical start.
+- [x] Give the second column more usable width for stop reasons while keeping the first column compact for login time.
+- [x] Run mobile typecheck and record the review.
+
+## GC Cabin/Under Icon-Only Layout Review
+- Display changes:
+  - Removed visible status text from the top summary and GC row indicators.
+  - The top summary now uses only enlarged shape icons plus counts:
+    - blue circle = `작업중`
+    - red triangle = `중단`
+    - gray square = `작업 안함`
+  - The GC row header now shows only a larger shape icon on the right with no status text.
+- Layout changes:
+  - Kept the compact two-row layout, but fixed the column alignment so `Under` and `중단사유` start at the same horizontal position.
+  - Shrunk the left column to fit login time and gave the right column more remaining width for longer stop reasons.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## GC Cabin/Under Replacement Verification Plan (2026-03-06)
+- [x] Record a verification-only plan without changing implementation files.
+- [x] Inspect the GC equipment diff logic and existing regression tests for Cabin/Under name replacement events.
+- [x] Run targeted verification for Cabin/Under replacement handling and record the result.
+
+## GC Cabin/Under Replacement Verification Review
+- Implementation check:
+  - `detectGcEquipmentFocusEvents()` emits `gc_driver_changed` when Cabin changes and `gc_hk_changed` when Under changes.
+  - The event titles/messages are explicit (`GC188 Cabin A -> B`, `GC188 Under A -> B`).
+- Verification:
+  - Existing regression test `tests/equipment-focus.test.ts` passed and explicitly asserts both `gc_driver_changed` and `gc_hk_changed`.
+  - Additional inline verification with ASCII names produced:
+    - `gc_driver_changed`
+    - `gc_hk_changed`
+    - `gc_login_time_changed`
+  - This confirms a same-GC operator/helper replacement is treated as a change event, not as a logout/login pair.
+- Note:
+  - The inline shell verification with Korean literals was not reliable because of shell stdin encoding, so the deterministic result is the UTF-8 test file plus the ASCII direct invocation.
+
+## Crew Change Wording Plan (2026-03-06)
+- [x] Inspect current GC and YT change-event message generation and confirm YT driver replacement is not yet emitted.
+- [x] Record the wording correction in `tasks/lessons.md`.
+- [x] Update GC Cabin/Under change messages to use `교대` wording and extend YT unit status transitions to emit a driver replacement event with the same wording style.
+- [x] Run targeted server tests and typecheck, then record the review.
+
+## Crew Change Wording Review
+- Root cause:
+  - GC Cabin/Under personnel replacement alerts were emitted, but the user-facing wording stayed at `변경`.
+  - YT per-unit monitoring did not emit any event when the same YT stayed logged in and only the driver name changed, because the logic only covered semantic-state transitions and stopped-reason changes.
+- Changes:
+  - GC `gc_driver_changed` and `gc_hk_changed` now use `교대` titles/messages.
+  - YT `yt_unit_status_changed` gained a `driver_changed` transition kind and now emits `YT23 A -> B 교대` when the same YT number keeps running with a different driver.
+  - YT driver replacement alerts use a specific title: `YT 기사 교대 (YT23)`.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/equipment-focus.test.ts tests/yt-monitor.test.ts tests/semantic-dedupe.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+
+## GC Right-Column Alignment Plan (2026-03-06)
+- [x] Inspect the current `Under` / `중단사유` offset and record the alignment correction in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Remove the extra left inset from the lower-right `중단사유` field so it shares the same horizontal start as the upper-right `Under` field.
+- [x] Run mobile typecheck and record the review.
+
+## GC Right-Column Alignment Review
+- Root cause:
+  - The lower-right `중단사유` field had additional horizontal padding that the upper-right `Under` field did not, so the two rows started at different horizontal positions.
+- Fix:
+  - Removed the extra left inset from the `중단사유` container while preserving its compact highlight styling.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Home Return Button Plan (2026-03-06)
+- [x] Inspect the root stack header configuration and identify the top-level screens currently showing the default `< (tabs)` back control.
+- [x] Record the navigation correction in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Replace the default back title on home-entry screens with a circular `<` home-return button while preserving normal back behavior on deeper sub-screens.
+- [x] Run mobile typecheck and record the review.
+
+## Home Return Button Review
+- Scope:
+  - Replaced the default `< (tabs)` back control only on screens entered directly from the home cards:
+    - `vessels`
+    - `cranes`
+    - `equipment`
+    - `yt`
+    - `weather`
+    - `monitor`
+  - Left deeper monitor sub-screens on normal stack back behavior.
+- Implementation:
+  - Added a reusable circular header button component that calls `router.replace("/(tabs)")`.
+  - Hid the default back control on those home-entry screens and supplied the custom left header button instead.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Home Return Button Simplification Plan (2026-03-06)
+- [x] Inspect the current `HomeHeaderButton` styling and record the visual correction in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Simplify the button to a single-circle outline so it no longer looks like a circle inside another circle.
+- [x] Run mobile typecheck and record the review.
+
+## Home Return Button Simplification Review
+- Fix:
+  - Removed the filled-circle plus contrasting-border look and changed the control to a single circular outline with `<` inside.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Home Return Glyph Rollback Plan (2026-03-06)
+- [x] Inspect the current `HomeHeaderButton` glyph and record the rollback scope in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Restore the inner back glyph to the prior native-looking chevron while keeping the simplified circular button.
+- [x] Run mobile typecheck and record the verification.
+
+## Home Return Glyph Rollback Review
+- Fix:
+  - Kept the single-circle home-return button, but replaced the ASCII `<` with a native-looking chevron glyph.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Header Back Full Rollback Plan (2026-03-06)
+- [x] Record the correction that the user wants the full original default back button restored, not another partial style tweak.
+- [x] Remove the custom home-return button wiring and restore the original default `< (tabs)` stack back behavior on the top-level screens.
+- [x] Run mobile typecheck and record the rollback review.
+
+## Header Back Full Rollback Review
+- Fix:
+  - Removed the custom circular home-return button entirely.
+  - Restored the original Expo stack header back behavior, so the top-level screens are back to the default `< (tabs)` control.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅

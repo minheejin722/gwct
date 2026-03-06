@@ -17,6 +17,21 @@ interface CranesResponse {
   items: CraneLiveItem[];
 }
 
+function workStatePriority(state: GcWorkState): number {
+  if (state === "active") {
+    return 0;
+  }
+  if (state === "scheduled") {
+    return 1;
+  }
+  return 2;
+}
+
+function craneNumber(craneId: string): number {
+  const matched = craneId.match(/\d+/);
+  return matched ? Number(matched[0]) : Number.MAX_SAFE_INTEGER;
+}
+
 function workStateLabel(state: GcWorkState): string {
   if (state === "active") {
     return "작업중";
@@ -24,15 +39,29 @@ function workStateLabel(state: GcWorkState): string {
   if (state === "scheduled") {
     return "작업 예정";
   }
-  if (state === "idle") {
-    return "작업 없음";
+  return "작업 안함";
+}
+
+function workStateBadgeStyle(state: GcWorkState) {
+  if (state === "active") {
+    return styles.badgeActive;
   }
-  return "상태 미확인";
+  if (state === "scheduled") {
+    return styles.badgeScheduled;
+  }
+  return styles.badgeIdle;
 }
 
 export default function CranesScreen() {
   const { data, loading, refresh } = useEndpoint<CranesResponse>(API_URLS.cranes);
   const items = data?.items || [];
+  const sortedItems = [...items].sort((left, right) => {
+    const priorityDiff = workStatePriority(left.workState) - workStatePriority(right.workState);
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+    return craneNumber(left.craneId) - craneNumber(right.craneId);
+  });
 
   useEffect(() => {
     reportDuplicateCraneRows(items);
@@ -44,22 +73,11 @@ export default function CranesScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
     >
-      {items.map((item) => (
+      {sortedItems.map((item) => (
         <View key={buildCraneRenderKey(item)} style={styles.card}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>{item.craneId}</Text>
-            <View
-              style={[
-                styles.badge,
-                item.workState === "active"
-                  ? styles.badgeActive
-                  : item.workState === "scheduled"
-                    ? styles.badgeScheduled
-                    : item.workState === "idle"
-                      ? styles.badgeIdle
-                      : styles.badgeUnknown,
-              ]}
-            >
+            <View style={[styles.badge, workStateBadgeStyle(item.workState)]}>
               <Text style={styles.badgeText}>{workStateLabel(item.workState)}</Text>
             </View>
           </View>
@@ -72,7 +90,7 @@ export default function CranesScreen() {
           ) : null}
         </View>
       ))}
-      {!items.length ? <Text style={styles.empty}>크레인 데이터가 없습니다.</Text> : null}
+      {!sortedItems.length ? <Text style={styles.empty}>크레인 데이터가 없습니다.</Text> : null}
     </ScrollView>
   );
 }
@@ -92,7 +110,6 @@ const styles = StyleSheet.create({
   badgeActive: { backgroundColor: "#e9f8ec", borderColor: "#b7dfc0" },
   badgeScheduled: { backgroundColor: "#eef5ff", borderColor: "#b7cfee" },
   badgeIdle: { backgroundColor: "#f3f5f7", borderColor: "#d4dbe2" },
-  badgeUnknown: { backgroundColor: "#fff4e8", borderColor: "#edcfaa" },
   badgeText: { fontSize: 11, fontWeight: "800", color: "#204666" },
   meta: { fontSize: 13, color: "#2e5a80", marginTop: 2 },
   highlight: { fontSize: 15, color: "#7c1f1f", fontWeight: "700", marginTop: 4 },

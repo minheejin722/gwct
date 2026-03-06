@@ -668,8 +668,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.driverName && after.driverName && before.driverName !== after.driverName) {
       pushGcEvent(
         "gc_driver_changed",
-        `GC${gc} Cabin 변경`,
-        `GC${gc} Cabin ${before.driverName} -> ${after.driverName}`,
+        `GC${gc} Cabin 교대`,
+        `GC${gc} Cabin ${before.driverName} -> ${after.driverName} 교대`,
         before.driverName,
         after.driverName,
         {
@@ -706,8 +706,8 @@ export function detectGcEquipmentFocusEvents(
     } else if (before.hkName && after.hkName && before.hkName !== after.hkName) {
       pushGcEvent(
         "gc_hk_changed",
-        `GC${gc} Under 변경`,
-        `GC${gc} Under ${before.hkName} -> ${after.hkName}`,
+        `GC${gc} Under 교대`,
+        `GC${gc} Under ${before.hkName} -> ${after.hkName} 교대`,
         before.hkName,
         after.hkName,
         {
@@ -954,13 +954,14 @@ function buildYtUnitAlert(
   const currentReason = normalizeStateReason(input.after.stopReason);
   const driverName = input.after.driverName || input.before.driverName || null;
   const loginTime = input.after.loginTime || input.before.loginTime || null;
+  const title = input.transitionKind === "driver_changed" ? `YT 기사 교대 (${input.after.ytNo})` : `YT 상태 변화 (${input.after.ytNo})`;
 
   return createEvent({
     category: "YT",
     type: "yt_unit_status_changed",
     source: input.source,
     dedupeKey: `yt:unit:${input.after.ytNo}:${input.transitionKind}:${input.after.fingerprint}`,
-    title: `YT 상태 변화 (${input.after.ytNo})`,
+    title,
     message: input.message,
     beforeValue: input.before.semanticState,
     afterValue: input.after.semanticState,
@@ -1043,6 +1044,9 @@ export function detectYtUnitStatusEvents(
     ) {
       transitionKind = "stopped_reason_changed";
       message = `${label} 중단 사유 변경: ${previousReason || "-"} -> ${currentReason || "-"}`;
+    } else if (before.driverName && after.driverName && before.driverName !== after.driverName) {
+      transitionKind = "driver_changed";
+      message = `${ytNo} ${before.driverName} -> ${after.driverName} 교대`;
     }
 
     if (!transitionKind || !message) {

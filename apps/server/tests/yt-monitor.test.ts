@@ -153,6 +153,25 @@ describe("YT monitor rules", () => {
     expect(backActive[0]?.payload.transitionKind).toBe("logged_out_to_active");
   });
 
+  it("emits a driver replacement event when the same YT stays logged in with a different driver", () => {
+    const before = [ytRow("YT23", "Hong", "03-04 08:00", null)];
+    const after = [ytRow("YT23", "Kim", "03-04 08:00", null)];
+
+    const changed = detectYtUnitStatusEvents(
+      before,
+      after,
+      "gwct_equipment_status",
+      "2026-03-04T04:25:00.000Z",
+      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A" },
+    );
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.type).toBe("yt_unit_status_changed");
+    expect(changed[0]?.title).toBe("YT 기사 교대 (YT23)");
+    expect(changed[0]?.message).toBe("YT23 Hong -> Kim 교대");
+    expect(changed[0]?.payload.transitionKind).toBe("driver_changed");
+  });
+
   it("treats first baseline and identical fingerprint as no-op", () => {
     const baseline = detectYtUnitStatusEvents(
       [],

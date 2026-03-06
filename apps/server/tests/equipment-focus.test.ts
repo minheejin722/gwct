@@ -157,5 +157,13 @@ describe("equipment focus parser and event rules", () => {
     expect(secondTypes).toContain("gc_hk_changed");
     expect(secondTypes).toContain("gc_stop_reason_cleared");
     expect(secondTypes).toContain("gc_login_time_changed");
+    expect(secondEvents.find((event) => event.type === "gc_driver_changed")?.title).toBe("GC188 Cabin 교대");
+    expect(secondEvents.find((event) => event.type === "gc_driver_changed")?.message).toBe(
+      "GC188 Cabin 홍길동 -> 이몽룡 교대",
+    );
+    expect(secondEvents.find((event) => event.type === "gc_hk_changed")?.title).toBe("GC188 Under 교대");
+    expect(secondEvents.find((event) => event.type === "gc_hk_changed")?.message).toBe(
+      "GC188 Under HK김철수 -> HK박문수 교대",
+    );
   });
 });
