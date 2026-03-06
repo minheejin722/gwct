@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import type { CraneStatus } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
@@ -60,7 +60,11 @@ export default function CranesScreen() {
     if (priorityDiff !== 0) {
       return priorityDiff;
     }
-    return craneNumber(left.craneId) - craneNumber(right.craneId);
+    const craneDiff = craneNumber(left.craneId) - craneNumber(right.craneId);
+    if (craneDiff !== 0) {
+      return craneDiff;
+    }
+    return (left.vesselName || "").localeCompare(right.vesselName || "");
   });
 
   useEffect(() => {
@@ -85,9 +89,6 @@ export default function CranesScreen() {
           <Text style={styles.highlight}>잔량 합계: {item.totalRemaining ?? "-"}</Text>
           <Text style={styles.meta}>양하 잔량: {item.dischargeRemaining ?? "-"}</Text>
           <Text style={styles.meta}>적하 잔량: {item.loadRemaining ?? "-"}</Text>
-          {item.workState === "scheduled" ? (
-            <Text style={styles.note}>잔량은 남아 있지만 Cabin/Under/login 정보가 없어 작업 예정으로 분류됨</Text>
-          ) : null}
         </View>
       ))}
       {!sortedItems.length ? <Text style={styles.empty}>크레인 데이터가 없습니다.</Text> : null}
@@ -113,6 +114,5 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: "800", color: "#204666" },
   meta: { fontSize: 13, color: "#2e5a80", marginTop: 2 },
   highlight: { fontSize: 15, color: "#7c1f1f", fontWeight: "700", marginTop: 4 },
-  note: { marginTop: 6, fontSize: 12, color: "#2f5d86" },
   empty: { textAlign: "center", marginTop: 30, color: "#5f7890" },
 });

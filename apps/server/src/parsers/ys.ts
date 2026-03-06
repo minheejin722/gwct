@@ -1,4 +1,4 @@
-﻿import { load } from "cheerio";
+import { load } from "cheerio";
 import type { SourceId, WeatherNoticeSnapshot } from "@gwct/shared";
 import { sha256 } from "../lib/hash.js";
 import type { NormalizedSnapshotBundle } from "./types.js";
@@ -8,6 +8,10 @@ import {
   ysSuspendSignalPatterns,
   type YsSignalPattern,
 } from "./selectors/ys.js";
+
+const MAX_ACTIONABLE_BOARD_AGE_DAYS = 2;
+const TOP_BOARD_ROWS_TO_SCAN = 12;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 function clean(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
@@ -43,7 +47,7 @@ function emptyBundle(): NormalizedSnapshotBundle {
   };
 }
 
-type SignalField = "dispatch" | "standby";
+type SignalField = "dispatch" | "standby" | "board";
 
 interface SignalPatternMatch {
   field: SignalField;
@@ -56,6 +60,11 @@ interface CombinedSignalClassification {
   severity: "normal" | "warning" | "critical";
   matchedKeywords: string[];
   normalizedReason: string | null;
+}
+
+interface BoardRowCandidate {
+  headline: string;
+  postedDate: string | null;
 }
 
 function collectPatternMatches(
@@ -81,32 +90,40 @@ function formatNormalizedReason(
   keywords: string[],
   dispatchNormalized: string | null,
   standbyNormalized: string | null,
+  boardNormalized: string | null,
 ): string | null {
-  const dispatch = dispatchNormalized || "-";
-  const standby = standbyNormalized || "-";
+  const parts = [
+    `dispatch=${dispatchNormalized || "-"}`,
+    `standby=${standbyNormalized || "-"}`,
+    `board=${boardNormalized || "-"}`,
+  ];
 
-  if (semanticState === "SUSPENDED") {
-    return `SUSPENDED:${keywords.join(", ")} | dispatch=${dispatch} | standby=${standby}`;
+  if (semanticState === "SUSPENDED" || semanticState === "NORMAL") {
+    return `${semanticState}:${keywords.join(", ")} | ${parts.join(" | ")}`;
   }
 
-  if (semanticState === "NORMAL") {
-    return `NORMAL:${keywords.join(", ")} | dispatch=${dispatch} | standby=${standby}`;
-  }
-
-  if (dispatch === "-" && standby === "-") {
+  if (dispatchNormalized === null && standbyNormalized === null && boardNormalized === null) {
     return null;
   }
 
-  return `AMBIGUOUS | dispatch=${dispatch} | standby=${standby}`;
+  return `AMBIGUOUS | ${parts.join(" | ")}`;
 }
 
-function classifyCombinedSignal(
-  dispatchNormalized: string | null,
-  standbyNormalized: string | null,
+function classifySignal(
+  input: {
+    dispatchNormalized?: string | null;
+    standbyNormalized?: string | null;
+    boardNormalized?: string | null;
+  },
 ): CombinedSignalClassification {
+  const dispatchNormalized = input.dispatchNormalized ?? null;
+  const standbyNormalized = input.standbyNormalized ?? null;
+  const boardNormalized = input.boardNormalized ?? null;
+
   const suspendMatches = [
     ...collectPatternMatches("dispatch", dispatchNormalized, ysSuspendSignalPatterns),
     ...collectPatternMatches("standby", standbyNormalized, ysSuspendSignalPatterns),
+    ...collectPatternMatches("board", boardNormalized, ysSuspendSignalPatterns),
   ];
 
   if (suspendMatches.length > 0) {
@@ -121,6 +138,7 @@ function classifyCombinedSignal(
         matchedKeywords,
         dispatchNormalized,
         standbyNormalized,
+        boardNormalized,
       ),
     };
   }
@@ -128,6 +146,7 @@ function classifyCombinedSignal(
   const normalMatches = [
     ...collectPatternMatches("dispatch", dispatchNormalized, ysNormalSignalPatterns),
     ...collectPatternMatches("standby", standbyNormalized, ysNormalSignalPatterns),
+    ...collectPatternMatches("board", boardNormalized, ysNormalSignalPatterns),
   ];
 
   if (normalMatches.length > 0) {
@@ -142,6 +161,7 @@ function classifyCombinedSignal(
         matchedKeywords,
         dispatchNormalized,
         standbyNormalized,
+        boardNormalized,
       ),
     };
   }
@@ -151,8 +171,19 @@ function classifyCombinedSignal(
     semanticState: "UNKNOWN",
     severity: "warning",
     matchedKeywords: [],
-    normalizedReason: formatNormalizedReason("UNKNOWN", [], dispatchNormalized, standbyNormalized),
+    normalizedReason: formatNormalizedReason("UNKNOWN", [], dispatchNormalized, standbyNormalized, boardNormalized),
   };
+}
+
+function classifyCombinedSignal(
+  dispatchNormalized: string | null,
+  standbyNormalized: string | null,
+): CombinedSignalClassification {
+  return classifySignal({ dispatchNormalized, standbyNormalized });
+}
+
+function classifyBoardSignal(boardNormalized: string | null): CombinedSignalClassification {
+  return classifySignal({ boardNormalized });
 }
 
 function weatherSignature(snapshot: Omit<WeatherNoticeSnapshot, "signature">): string {
@@ -204,6 +235,125 @@ function pickStandbyFallback($: ReturnType<typeof load>): string | null {
   );
 }
 
+function kstDayIndexFromIso(isoString: string): number | null {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return Math.floor((date.getTime() + KST_OFFSET_MS) / 86400000);
+}
+
+function boardDayIndex(rawDate: string | null): number | null {
+  if (!rawDate) {
+    return null;
+  }
+  const matched = rawDate.match(/(\d{4})[./-](\d{2})[./-](\d{2})/);
+  if (!matched) {
+    return null;
+  }
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function isActionableBoardRow(postedDate: string | null, seenAt: string): boolean {
+  const rowDay = boardDayIndex(postedDate);
+  const seenDay = kstDayIndexFromIso(seenAt);
+  if (rowDay === null || seenDay === null) {
+    return false;
+  }
+  const deltaDays = seenDay - rowDay;
+  return deltaDays >= 0 && deltaDays <= MAX_ACTIONABLE_BOARD_AGE_DAYS;
+}
+
+function extractBoardRows(html: string): BoardRowCandidate[] {
+  const $ = load(html);
+  return $(ysSelectors.board.rows)
+    .map((_, row) => {
+      const cells = $(row)
+        .find(ysSelectors.board.cells)
+        .map((__, td) => clean($(td).text()))
+        .get()
+        .filter(Boolean);
+
+      if (cells.length < 2) {
+        return null;
+      }
+
+      const numberCell = cells[0] || null;
+      const headline = cells[1] || null;
+      const postedDate = cells.length >= 4 ? cells[3] : null;
+
+      if (!headline || headline === "제목" || numberCell === "번호") {
+        return null;
+      }
+
+      if (!numberCell) {
+        return null;
+      }
+
+      if (numberCell !== "공지" && !/^\d+$/.test(numberCell)) {
+        return null;
+      }
+
+      return {
+        headline,
+        postedDate,
+      } satisfies BoardRowCandidate;
+    })
+    .get()
+    .filter((item): item is BoardRowCandidate => Boolean(item))
+    .slice(0, TOP_BOARD_ROWS_TO_SCAN);
+}
+
+function selectBoardEvidence(
+  rows: BoardRowCandidate[],
+  seenAt: string,
+): {
+  headline: string | null;
+  classification: CombinedSignalClassification;
+} {
+  if (!rows.length) {
+    return {
+      headline: null,
+      classification: classifyBoardSignal(null),
+    };
+  }
+
+  const actionableRows = rows.filter((row) => isActionableBoardRow(row.postedDate, seenAt));
+  const candidates = actionableRows;
+
+  for (const row of candidates) {
+    const classification = classifyBoardSignal(normalizeSignalText(row.headline));
+    if (classification.semanticState === "SUSPENDED") {
+      return {
+        headline: row.headline,
+        classification,
+      };
+    }
+  }
+
+  for (const row of candidates) {
+    const classification = classifyBoardSignal(normalizeSignalText(row.headline));
+    if (classification.semanticState === "NORMAL") {
+      return {
+        headline: row.headline,
+        classification,
+      };
+    }
+  }
+
+  const fallback = rows[0];
+  return {
+    headline: fallback?.headline || null,
+    classification: classifyBoardSignal(null),
+  };
+}
+
 export function parseYsForecast(html: string, seenAt: string, source: SourceId): NormalizedSnapshotBundle {
   const bundle = emptyBundle();
   const $ = load(html);
@@ -226,7 +376,7 @@ export function parseYsForecast(html: string, seenAt: string, source: SourceId):
       .map((__, h) => clean($(h).text()))
       .get();
 
-    if (!legacyDutyText && headers.some((h) => h.includes("근무자"))) {
+    if (!legacyDutyText && headers.some((header) => header.includes("근무자"))) {
       const firstDuty = clean(
         $(row)
           .next()
@@ -248,8 +398,7 @@ export function parseYsForecast(html: string, seenAt: string, source: SourceId):
 
   const weatherBase: Omit<WeatherNoticeSnapshot, "signature"> = {
     source,
-    // `dutyText` column is reused for standby call text persistence to avoid schema migration.
-    dutyText: standbyCallText || legacyDutyText || null,
+    dutyText: legacyDutyText,
     dispatchTeamDutyText,
     standbyCallText,
     noticeHeadline: null,
@@ -280,43 +429,22 @@ export function parseYsForecast(html: string, seenAt: string, source: SourceId):
   return bundle;
 }
 
-export function parseYsNotice(html: string, seenAt: string, source: SourceId): NormalizedSnapshotBundle {
+function parseYsBoardList(html: string, seenAt: string, source: SourceId): NormalizedSnapshotBundle {
   const bundle = emptyBundle();
-  const $ = load(html);
-
-  let headline: string | null = null;
-
-  $(ysSelectors.notice.rows).each((_, row) => {
-    const text = clean($(row).text());
-    if (!/^\d+\s/.test(text)) {
-      return;
-    }
-
-    const cells = $(row)
-      .find("td")
-      .map((__, td) => clean($(td).text()))
-      .get();
-
-    if (cells.length >= 2) {
-      headline = cells[1] || null;
-      return false;
-    }
-    return;
-  });
-
-  const classified = classifyCombinedSignal(normalizeSignalText(headline), null);
+  const rows = extractBoardRows(html);
+  const selected = selectBoardEvidence(rows, seenAt);
 
   const weatherBase: Omit<WeatherNoticeSnapshot, "signature"> = {
     source,
     dutyText: null,
     dispatchTeamDutyText: null,
     standbyCallText: null,
-    noticeHeadline: headline,
-    suspensionState: classified.suspensionState,
-    semanticState: classified.semanticState,
-    matchedKeywords: classified.matchedKeywords,
-    normalizedReason: classified.normalizedReason,
-    severity: classified.severity,
+    noticeHeadline: selected.headline,
+    suspensionState: selected.classification.suspensionState,
+    semanticState: selected.classification.semanticState,
+    matchedKeywords: selected.classification.matchedKeywords,
+    normalizedReason: selected.classification.normalizedReason,
+    severity: selected.classification.severity,
     seenAt,
   };
 
@@ -325,7 +453,25 @@ export function parseYsNotice(html: string, seenAt: string, source: SourceId): N
     signature: weatherSignature(weatherBase),
   };
 
+  if (!rows.length) {
+    bundle.diagnostics.push({
+      parserName: "parseYsBoardList",
+      reason: "board headline rows missing",
+      diagnostics: {
+        source,
+      },
+    });
+  }
+
   return bundle;
+}
+
+export function parseYsNotice(html: string, seenAt: string, source: SourceId): NormalizedSnapshotBundle {
+  return parseYsBoardList(html, seenAt, source);
+}
+
+export function parseYsNews(html: string, seenAt: string, source: SourceId): NormalizedSnapshotBundle {
+  return parseYsBoardList(html, seenAt, source);
 }
 
 export { classifyCombinedSignal, normalizeSignalText };

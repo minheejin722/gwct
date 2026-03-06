@@ -71,7 +71,7 @@ function formatRelativeDayLabel(dayShift: number): string {
     return "모레";
   }
   if (dayShift > 2) {
-    return `${dayShift}일 후`;
+    return `${dayShift}일 뒤`;
   }
   if (dayShift === -1) {
     return "어제";
@@ -101,14 +101,17 @@ export function summarizeGwctEtaChange(previousEta: string, currentEta: string):
   const currentDate = toUtcDateIndex(current);
   const dayShift = currentDate - previousDate;
   const crossedDate = dayShift !== 0;
+  const duration = formatDuration(deltaMinutes);
 
   let humanMessage: string;
-  if (direction === "earlier") {
-    humanMessage = `종전보다 ${formatDuration(deltaMinutes)} 더 일찍 입항 예정입니다.`;
-  } else if (!crossedDate) {
-    humanMessage = `종전보다 ${formatDuration(deltaMinutes)} 더 늦게 입항 예정입니다.`;
+  if (direction === "earlier" && !crossedDate) {
+    humanMessage = `종전보다 ${duration} 더 일찍 입항 예정입니다.`;
+  } else if (direction === "later" && !crossedDate) {
+    humanMessage = `종전보다 ${duration} 더 늦게 입항 예정입니다.`;
+  } else if (direction === "earlier") {
+    humanMessage = `${formatRelativeDayLabel(dayShift)}로 ${duration} 더 일찍 입항 예정입니다.`;
   } else {
-    humanMessage = `${formatRelativeDayLabel(dayShift)}로 입항이 밀렸습니다.`;
+    humanMessage = `${formatRelativeDayLabel(dayShift)}로 ${duration} 더 늦게 입항 예정입니다.`;
   }
 
   return {

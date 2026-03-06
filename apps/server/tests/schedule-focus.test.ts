@@ -44,6 +44,8 @@ describe("schedule focus parser and eta diff", () => {
 
     expect(bundle.vessels).toHaveLength(11);
     expect(bundle.vessels[0]?.terminalVoyage).toBe("Y-0001");
+    expect(bundle.vessels[0]?.eta).toBe("2026-02-28T16:00:00.000Z");
+    expect(bundle.vessels[0]?.etd).toBe("2026-03-01T15:00:00.000Z");
     expect(bundle.vessels[10]?.terminalVoyage).toBe("C-008");
     expect(bundle.vessels.every((row) => row.rawLabelMap._rowColor !== "green")).toBe(true);
   });

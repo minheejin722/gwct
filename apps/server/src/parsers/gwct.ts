@@ -558,6 +558,7 @@ function extractCraneStatsFromTable(
     .get();
 
   const craneIndices: Array<{ craneId: string; dischargeIdx: number; loadIdx: number }> = [];
+  let gcOrder = 0;
   for (let i = 0; i < headerCells.length; i += 1) {
     const text = headerCells[i];
     const match = text.match(/G\/?C\s*(\d+)/i);
@@ -565,9 +566,10 @@ function extractCraneStatsFromTable(
       continue;
     }
     const craneId = `GC${match[1]}`;
-    const dischargeIdx = i;
-    const loadIdx = i + 1;
+    const dischargeIdx = 1 + gcOrder * 2;
+    const loadIdx = dischargeIdx + 1;
     craneIndices.push({ craneId, dischargeIdx, loadIdx });
+    gcOrder += 1;
   }
 
   const rowMap = new Map<string, string[]>();

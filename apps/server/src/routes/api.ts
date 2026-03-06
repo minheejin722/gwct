@@ -22,6 +22,8 @@ import { loadEquipmentLatestSnapshot } from "../services/equipment/latestStore.j
 import { buildGcCraneLiveRows } from "../services/gc/workState.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
+import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services/yeosu/effectiveState.js";
+import { buildVesselLiveRows } from "../services/vessels/liveRows.js";
 
 interface RouteDeps {
   repo: Repository;
@@ -151,7 +153,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/health", async () => ({ ok: true, time: new Date().toISOString() }));
 
   app.get("/api/dashboard/summary", async () => {
-    const [settings, scheduleLatest, gcLatest, equipmentLatest, equipmentRows, ytSnapshot, weather, meta] = await Promise.all([
+    const [settings, scheduleLatest, gcLatest, equipmentLatest, equipmentRows, ytSnapshot, forecast, notice, news, meta] = await Promise.all([
       loadMonitorSettings(),
       loadScheduleFocusSnapshot(),
       loadGcLatestSnapshot(),
@@ -159,8 +161,16 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       deps.repo.getLatestEquipmentStatuses("gwct_equipment_status"),
       deps.repo.getLatestYtSnapshot("gwct_equipment_status"),
       deps.repo.getLatestWeatherSnapshot("ys_forecast"),
+      deps.repo.getLatestWeatherSnapshot("ys_notice"),
+      deps.repo.getLatestWeatherSnapshot("ys_news"),
       deps.repo.getDashboardMeta(),
     ]);
+    const weather = buildEffectiveYeosuSnapshot({
+      forecast,
+      notice,
+      news,
+      fallbackState: settings.yeosuPilotageMonitor.lastNormalizedState,
+    });
 
     return {
       lastUpdatedAt: meta.lastUpdatedAt,
@@ -178,61 +188,24 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       deps.repo.getLatestVesselItems("gwct_schedule_list"),
       deps.repo.getRecentAlerts(500),
     ]);
-
-    const latestEtaChangeByVessel = new Map<
-      string,
-      {
-        eventId: string;
-        occurredAt: string;
-        previousEta: string;
-        currentEta: string;
-        deltaMinutes: number;
-        direction: "earlier" | "later";
-        crossedDate: boolean;
-        humanMessage: string;
-      }
-    >();
-
-    for (const alert of alerts) {
-      if (alert.type !== "gwct_eta_changed") {
-        continue;
-      }
-      const payload = (alert.payload || {}) as Record<string, unknown>;
-      const vesselKey = typeof payload.vesselKey === "string" ? payload.vesselKey : null;
-      if (!vesselKey || latestEtaChangeByVessel.has(vesselKey)) {
-        continue;
-      }
-
-      const previousEta = typeof payload.previousEta === "string" ? payload.previousEta : null;
-      const currentEta = typeof payload.currentEta === "string" ? payload.currentEta : null;
-      const deltaMinutes = typeof payload.deltaMinutes === "number" ? payload.deltaMinutes : null;
-      const direction =
-        payload.direction === "earlier" || payload.direction === "later" ? payload.direction : null;
-      const crossedDate = typeof payload.crossedDate === "boolean" ? payload.crossedDate : false;
-      const humanMessage = typeof payload.humanMessage === "string" ? payload.humanMessage : null;
-      if (!previousEta || !currentEta || deltaMinutes === null || !direction || !humanMessage) {
-        continue;
-      }
-
-      latestEtaChangeByVessel.set(vesselKey, {
-        eventId: alert.id,
-        occurredAt: alert.occurredAt.toISOString(),
-        previousEta,
-        currentEta,
-        deltaMinutes,
-        direction,
-        crossedDate,
-        humanMessage,
-      });
-    }
+    const alertRows: AlertEvent[] = alerts.map((alert) => ({
+      id: alert.id,
+      category: alert.category as AlertEvent["category"],
+      type: alert.type,
+      dedupeKey: alert.dedupeKey,
+      title: alert.title,
+      message: alert.message,
+      beforeValue: alert.beforeValue,
+      afterValue: alert.afterValue,
+      payload: (alert.payload as Record<string, unknown>) || {},
+      occurredAt: alert.occurredAt.toISOString(),
+    }));
+    const items = buildVesselLiveRows(rows, alertRows);
 
     return {
       source: "gwct_schedule_list",
-      count: rows.length,
-      items: rows.map((row) => ({
-        ...row,
-        latestEtaChange: latestEtaChangeByVessel.get(row.vesselKey) || null,
-      })),
+      count: items.length,
+      items,
     };
   });
 
@@ -329,13 +302,23 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/weather/live", async () => {
-    const forecast = await deps.repo.getLatestWeatherSnapshot("ys_forecast");
-    const notice = await deps.repo.getLatestWeatherSnapshot("ys_notice");
-    const settings = await loadMonitorSettings();
+    const [forecast, notice, news, settings] = await Promise.all([
+      deps.repo.getLatestWeatherSnapshot("ys_forecast"),
+      deps.repo.getLatestWeatherSnapshot("ys_notice"),
+      deps.repo.getLatestWeatherSnapshot("ys_news"),
+      loadMonitorSettings(),
+    ]);
+    const primary = buildEffectiveYeosuSnapshot({
+      forecast,
+      notice,
+      news,
+      fallbackState: settings.yeosuPilotageMonitor.lastNormalizedState,
+    });
     return {
       forecast,
       notice,
-      primary: forecast,
+      news,
+      primary,
       monitor: settings.yeosuPilotageMonitor,
     };
   });
@@ -439,15 +422,23 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/monitors/yeosu", async () => {
-    const [config, forecast] = await Promise.all([
+    const [config, forecast, notice, news] = await Promise.all([
       loadMonitorSettings(),
       deps.repo.getLatestWeatherSnapshot("ys_forecast"),
+      deps.repo.getLatestWeatherSnapshot("ys_notice"),
+      deps.repo.getLatestWeatherSnapshot("ys_news"),
     ]);
+    const primary = buildEffectiveYeosuSnapshot({
+      forecast,
+      notice,
+      news,
+      fallbackState: config.yeosuPilotageMonitor.lastNormalizedState,
+    });
     return {
       ...config.yeosuPilotageMonitor,
-      latestCapturedAt: forecast?.seenAt || null,
-      latestForecastState: forecast?.suspensionState || "none",
-      latestDutyText: forecast?.dispatchTeamDutyText || forecast?.standbyCallText || forecast?.dutyText || null,
+      latestCapturedAt: primary?.seenAt || forecast?.seenAt || null,
+      latestForecastState: primary?.suspensionState || "none",
+      latestDutyText: buildYeosuObservedText(primary) || buildYeosuObservedText(forecast),
     };
   });
 
@@ -463,13 +454,21 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/monitors/status", async () => {
-    const [config, scheduleLatest, gcLatest, equipmentLatest, forecast] = await Promise.all([
+    const [config, scheduleLatest, gcLatest, equipmentLatest, forecast, notice, news] = await Promise.all([
       loadMonitorSettings(),
       loadScheduleFocusSnapshot(),
       loadGcLatestSnapshot(),
       loadEquipmentLatestSnapshot(),
       deps.repo.getLatestWeatherSnapshot("ys_forecast"),
+      deps.repo.getLatestWeatherSnapshot("ys_notice"),
+      deps.repo.getLatestWeatherSnapshot("ys_news"),
     ]);
+    const primaryWeather = buildEffectiveYeosuSnapshot({
+      forecast,
+      notice,
+      news,
+      fallbackState: config.yeosuPilotageMonitor.lastNormalizedState,
+    });
 
     const previewCount = config.gwctEtaMonitor.trackingCount;
     const schedulePreview = scheduleLatest?.items.slice(0, previewCount) || [];
@@ -493,9 +492,9 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
           gcStates: equipmentLatest?.gcStates || [],
         },
         yeosuPilotage: {
-          capturedAt: forecast?.seenAt || null,
-          suspensionState: forecast?.suspensionState || "none",
-          dutyText: forecast?.dispatchTeamDutyText || forecast?.standbyCallText || forecast?.dutyText || null,
+          capturedAt: primaryWeather?.seenAt || forecast?.seenAt || null,
+          suspensionState: primaryWeather?.suspensionState || "none",
+          dutyText: buildYeosuObservedText(primaryWeather) || buildYeosuObservedText(forecast),
         },
       },
     };

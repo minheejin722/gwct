@@ -1118,7 +1118,7 @@ export function diffWeather(
   }
 
   if (
-    source === "ys_notice" &&
+    source !== "ys_forecast" &&
     options?.ignoreNoticeWhenForecastActive &&
     options.forecastState &&
     options.forecastState !== "none"

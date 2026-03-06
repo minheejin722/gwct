@@ -91,4 +91,47 @@ describe("gc work state", () => {
     expect(rows.find((row) => row.craneId === "GC183")?.workState).toBe("idle");
     expect(rows.find((row) => row.craneId === "GC182")?.vesselName).toBe("MSC TINA");
   });
+
+  it("keeps same GC as separate vessel rows when multiple vessels still have remaining work", () => {
+    const gcSnapshot: GcRemainingSnapshot = {
+      source: "gwct_gc_remaining",
+      sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=F&s=A",
+      capturedAt: "2026-03-07T00:43:41.000Z",
+      items: [
+        { gc: 185, dischargeRemaining: 11, loadRemaining: 8, remainingSubtotal: 19 },
+      ],
+    };
+
+    const equipmentSnapshot: EquipmentFocusSnapshot = {
+      source: "gwct_equipment_status",
+      sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+      capturedAt: "2026-03-07T00:44:00.000Z",
+      ytCount: 0,
+      ytKnown: 0,
+      ytUnits: [],
+      gcStates: [
+        {
+          gcNo: 185,
+          equipmentId: "GC185",
+          driverName: null,
+          hkName: null,
+          loginTime: null,
+          stopReason: null,
+        },
+      ],
+    };
+
+    const rows = buildGcCraneLiveRows(gcSnapshot, equipmentSnapshot, [
+      craneRow("GC185", "VESSEL-A", 5, 3, 8),
+      craneRow("GC185", "VESSEL-B", 6, 5, 11),
+    ]);
+
+    const gc185Rows = rows.filter((row) => row.craneId === "GC185");
+
+    expect(rows).toHaveLength(11);
+    expect(gc185Rows).toHaveLength(2);
+    expect(gc185Rows.map((row) => row.vesselName)).toEqual(["VESSEL-A", "VESSEL-B"]);
+    expect(gc185Rows.map((row) => row.totalRemaining)).toEqual([8, 11]);
+    expect(gc185Rows.every((row) => row.workState === "scheduled")).toBe(true);
+  });
 });

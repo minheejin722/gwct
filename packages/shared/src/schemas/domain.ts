@@ -8,6 +8,7 @@ export const SourceIdSchema = z.enum([
   "gwct_equipment_status",
   "ys_forecast",
   "ys_notice",
+  "ys_news",
 ]);
 export type SourceId = z.infer<typeof SourceIdSchema>;
 

@@ -38,4 +38,9 @@ export const SOURCE_DEFINITIONS: SourceDefinition[] = [
     url: env.urls.ysNotice,
     intervalMs: env.YS_INTERVAL_MS,
   },
+  {
+    source: "ys_news",
+    url: env.urls.ysNews,
+    intervalMs: env.YS_INTERVAL_MS,
+  },
 ];

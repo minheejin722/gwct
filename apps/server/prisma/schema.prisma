@@ -189,9 +189,12 @@ model WeatherNoticeSnapshot {
   source               String
   dutyText             String?
   dispatchTeamDutyText String?
+  standbyCallText      String?
   noticeHeadline       String?
   suspensionState      String
+  semanticState        String   @default("UNKNOWN")
   matchedKeywords      Json
+  normalizedReason     String?
   severity             String
   signature            String
   seenAt               DateTime

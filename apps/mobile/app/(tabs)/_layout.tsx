@@ -71,6 +71,10 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Settings",
+          headerStyle: { backgroundColor: colors.screenBackground },
+          headerTintColor: colors.primaryText,
+          headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
+          headerShadowVisible: false,
           tabBarIcon: ({ color }) => <Ionicons name="settings-outline" size={24} color={color} />,
         }}
       />

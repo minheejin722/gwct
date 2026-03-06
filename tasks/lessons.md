@@ -35,3 +35,14 @@
 - If the user says to return to the original state, revert the full visible behavior to the pre-change baseline instead of interpreting it as a partial style tweak.
 - For oversized summary cards on the home screen, scale the headline label and numeric value to match the available whitespace before changing layout structure; operators usually want stronger visual hierarchy, not a new card design.
 - If the user immediately cancels a just-made visual tweak, revert that exact tweak completely instead of iterating further on the same direction.
+- For GWCT vessel schedule work, do not trust raw ISO timestamps or implicit DB row order in the mobile UI. Always verify the live `m=H&s=A` table columns and row colors, then return KST display fields plus explicit watch-window order/color metadata from the server.
+- When a menu screen is meant to navigate to multiple operational tools, present each destination as a clearly separated tappable card with its own visual affordance instead of leaving items as bare stacked text; operators should read it as a button list at a glance.
+- If the backend already resolves an operational state like `작업 예정`, do not repeat the full reasoning sentence in every status card unless the user explicitly wants that rationale visible; the badge/state label should stay primary and cards should remain compact.
+- For GWCT `m=F&s=A` crane tables, do not map discharge/load cells using the first header-row column index when each `G/C nnn` header spans two body columns. Parse the GC order separately and address body cells as `1 + gcIndex * 2`, or trailing GC rows will inherit earlier cranes' remaining values.
+
+## 2026-03-07
+- When using official board-list pages as a fallback signal source for live operational state, never let historical titles drive the current state indefinitely. Scan multiple recent rows, but add an explicit recency guard so old suspension notices remain reference text only and do not override the live forecast.
+- For menu-card screens where the whole card is already tappable, do not keep a trailing chevron by default if the user wants a calmer layout; use vertical spacing and card hierarchy to signal affordance instead of duplicating tap cues.
+- When the user cares about first-screen fit on a phone, reduce oversized hero/header sections before compressing the actual action cards; clipped bottom actions look worse than slightly denser intro copy.
+- For dense card lists on phone screens, when the user asks for only a slight visual breathing adjustment, change the local gap between the specific elements first (for example icon row vs title block) instead of touching global card height or screen padding again.
+- When a tab screen needs to visually blend into a light page and keep iPhone status-bar glyphs readable, do not change the global tab header theme. Override that specific tab's header background/tint to the screen palette instead.

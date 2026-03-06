@@ -55,6 +55,7 @@ export const env = {
     ysForecast: "http://www.yspilot.co.kr/forecast",
     ysForecastStatus: "http://www.yspilot.co.kr/forecast/status",
     ysNotice: "http://www.yspilot.co.kr/boards/lists/notice",
+    ysNews: "http://www.yspilot.co.kr/boards/lists/news",
   },
 } as const;
 

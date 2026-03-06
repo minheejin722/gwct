@@ -2,7 +2,6 @@ import type { CraneStatus } from "@gwct/shared";
 import { sha256 } from "../../lib/hash.js";
 import type { EquipmentFocusSnapshot, GcEquipmentState } from "../equipment/latestStore.js";
 import type { GcRemainingItem, GcRemainingSnapshot } from "./latestStore.js";
-import { normalizeCraneLiveRows } from "./liveRows.js";
 
 export type GcWorkState = "active" | "scheduled" | "idle" | "unknown";
 
@@ -50,14 +49,35 @@ function buildGcEquipmentMap(snapshot: EquipmentFocusSnapshot | null): Map<numbe
   return map;
 }
 
-function buildGcWorkRowMap(rows: CraneStatus[]): Map<number, CraneStatus> {
-  const map = new Map<number, CraneStatus>();
-  for (const row of normalizeCraneLiveRows(rows)) {
+function hasPositiveRemaining(row: CraneStatus): boolean {
+  if (typeof row.totalRemaining === "number") {
+    return row.totalRemaining > 0;
+  }
+  return (row.dischargeRemaining ?? 0) > 0 || (row.loadRemaining ?? 0) > 0;
+}
+
+function compareWorkRows(left: CraneStatus, right: CraneStatus): number {
+  const leftVessel = normalizeOptionalText(left.vesselName) || "";
+  const rightVessel = normalizeOptionalText(right.vesselName) || "";
+  return leftVessel.localeCompare(rightVessel) || left.signature.localeCompare(right.signature);
+}
+
+function buildGcPositiveWorkRowsMap(rows: CraneStatus[]): Map<number, CraneStatus[]> {
+  const map = new Map<number, CraneStatus[]>();
+  for (const row of rows) {
     const gc = parseGcNoFromCraneId(row.craneId);
     if (gc === null) {
       continue;
     }
-    map.set(gc, row);
+    if (!hasPositiveRemaining(row)) {
+      continue;
+    }
+    const current = map.get(gc) || [];
+    current.push(row);
+    map.set(gc, current);
+  }
+  for (const [gc, bucket] of map) {
+    map.set(gc, [...bucket].sort(compareWorkRows));
   }
   return map;
 }
@@ -90,7 +110,7 @@ export function buildGcCraneLiveRows(
 ): GcCraneLiveRow[] {
   const remainingByGc = buildGcRemainingMap(gcSnapshot);
   const equipmentByGc = buildGcEquipmentMap(equipmentSnapshot);
-  const workRowsByGc = buildGcWorkRowMap(workStatusRows);
+  const workRowsByGc = buildGcPositiveWorkRowsMap(workStatusRows);
   const seenAtFallback = gcSnapshot?.capturedAt || equipmentSnapshot?.capturedAt || new Date().toISOString();
 
   const rows: GcCraneLiveRow[] = [];
@@ -99,9 +119,45 @@ export function buildGcCraneLiveRows(
     const craneId = `GC${gc}`;
     const remaining = remainingByGc.get(gc);
     const equipment = equipmentByGc.get(gc);
-    const workRow = workRowsByGc.get(gc);
-    const totalRemaining = remaining?.remainingSubtotal ?? workRow?.totalRemaining ?? null;
+    const workRows = workRowsByGc.get(gc) || [];
     const crewAssigned = hasAssignedGcCrew(equipment);
+
+    if (workRows.length > 1) {
+      workRows.forEach((workRow) => {
+        const totalRemaining = workRow.totalRemaining ?? null;
+        const workState = deriveGcWorkState(totalRemaining, equipment);
+        const rowBase: Omit<GcCraneLiveRow, "signature"> = {
+          source: workRow.source,
+          craneId,
+          vesselName: workRow.vesselName ?? null,
+          dischargeDone: workRow.dischargeDone ?? null,
+          loadDone: workRow.loadDone ?? null,
+          dischargeRemaining: workRow.dischargeRemaining ?? null,
+          loadRemaining: workRow.loadRemaining ?? null,
+          totalRemaining,
+          progressPercent: workRow.progressPercent ?? null,
+          seenAt: workRow.seenAt || gcSnapshot?.capturedAt || seenAtFallback,
+          workState,
+          crewAssigned,
+        };
+
+        rows.push({
+          ...rowBase,
+          signature: sha256(
+            JSON.stringify({
+              ...rowBase,
+              driverName: equipment?.driverName ?? null,
+              hkName: equipment?.hkName ?? null,
+              loginTime: equipment?.loginTime ?? null,
+            }),
+          ),
+        });
+      });
+      continue;
+    }
+
+    const workRow = workRows[0];
+    const totalRemaining = remaining?.remainingSubtotal ?? workRow?.totalRemaining ?? null;
     const workState = deriveGcWorkState(totalRemaining, equipment);
 
     const rowBase: Omit<GcCraneLiveRow, "signature"> = {
@@ -114,7 +170,7 @@ export function buildGcCraneLiveRows(
       loadRemaining: remaining?.loadRemaining ?? workRow?.loadRemaining ?? null,
       totalRemaining,
       progressPercent: workRow?.progressPercent ?? null,
-      seenAt: gcSnapshot?.capturedAt || workRow?.seenAt || seenAtFallback,
+      seenAt: workRow?.seenAt || gcSnapshot?.capturedAt || seenAtFallback,
       workState,
       crewAssigned,
     };

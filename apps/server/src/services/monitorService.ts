@@ -1,4 +1,4 @@
-﻿import type { SourceId, WeatherNoticeSnapshot } from "@gwct/shared";
+﻿import type { SourceId } from "@gwct/shared";
 import type { FastifyBaseLogger } from "fastify";
 import { env } from "../config/env.js";
 import type { Repository, AlertEventInput } from "../db/repository.js";
@@ -34,6 +34,7 @@ import {
   setYeosuObservedState,
   setYtMonitorState,
 } from "./monitorConfig/store.js";
+import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "./yeosu/effectiveState.js";
 
 export interface RunOptions {
   mode?: "live" | "fixture";
@@ -441,52 +442,25 @@ export class MonitorService {
       const prev = await this.repo.getLatestWeatherSnapshot(source);
       let current = bundle.weather;
 
-      if (source === "ys_forecast" && current.suspensionState === "none") {
-        const notice = await this.repo.getLatestWeatherSnapshot("ys_notice");
-        if (notice && notice.suspensionState !== "none") {
-          current = {
-            ...current,
-            suspensionState: notice.suspensionState,
-            semanticState: notice.semanticState,
-            severity: notice.severity,
-            noticeHeadline: notice.noticeHeadline,
-            matchedKeywords: Array.from(new Set([...current.matchedKeywords, ...notice.matchedKeywords])),
-            normalizedReason: notice.normalizedReason || current.normalizedReason,
-          } satisfies WeatherNoticeSnapshot;
-        }
-      }
-
-      if (source === "ys_forecast" && current.semanticState === "UNKNOWN") {
-        const fallbackSemanticState =
-          monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "all" ||
-          monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "partial"
-            ? "SUSPENDED"
-            : monitorSettings.yeosuPilotageMonitor.lastNormalizedState === "none"
-              ? "NORMAL"
-              : prev?.suspensionState === "all" || prev?.suspensionState === "partial"
-                ? "SUSPENDED"
-                : "NORMAL";
-
-        current = {
-          ...current,
-          semanticState: fallbackSemanticState,
-          suspensionState: fallbackSemanticState === "SUSPENDED" ? "all" : "none",
-          normalizedReason:
-            current.normalizedReason ||
-            `AMBIGUOUS_KEEP_PREV:${fallbackSemanticState}`,
-        } satisfies WeatherNoticeSnapshot;
+      if (source === "ys_forecast") {
+        const [notice, news] = await Promise.all([
+          this.repo.getLatestWeatherSnapshot("ys_notice"),
+          this.repo.getLatestWeatherSnapshot("ys_news"),
+        ]);
+        current =
+          buildEffectiveYeosuSnapshot({
+            forecast: current,
+            notice,
+            news,
+            fallbackState: monitorSettings.yeosuPilotageMonitor.lastNormalizedState,
+          }) || current;
       }
 
       await this.repo.saveWeatherSnapshot(current);
 
       if (source === "ys_forecast") {
-        const weatherText = current.dispatchTeamDutyText || current.noticeHeadline || current.dutyText || null;
-        const weatherState =
-          current.semanticState === "UNKNOWN"
-            ? monitorSettings.yeosuPilotageMonitor.lastNormalizedState || current.suspensionState
-            : current.semanticState === "SUSPENDED"
-              ? "all"
-              : "none";
+        const weatherText = buildYeosuObservedText(current);
+        const weatherState = current.semanticState === "SUSPENDED" ? "all" : "none";
         const observedChanged =
           monitorSettings.yeosuPilotageMonitor.lastRawText !== weatherText ||
           monitorSettings.yeosuPilotageMonitor.lastNormalizedState !== weatherState;
@@ -497,19 +471,8 @@ export class MonitorService {
         });
       }
 
-      if (prev && monitorSettings.yeosuPilotageMonitor.enabled) {
-        let forecastState: "none" | "partial" | "all" = "none";
-        if (source === "ys_notice") {
-          const forecast = await this.repo.getLatestWeatherSnapshot("ys_forecast");
-          forecastState = forecast?.suspensionState ?? "none";
-        }
-
-        alerts.push(
-          ...diffWeather(prev, current, source, occurredAt, {
-            ignoreNoticeWhenForecastActive: true,
-            forecastState,
-          }),
-        );
+      if (source === "ys_forecast" && prev && monitorSettings.yeosuPilotageMonitor.enabled) {
+        alerts.push(...diffWeather(prev, current, source, occurredAt));
       }
     }
 
@@ -624,3 +587,4 @@ export class MonitorService {
     );
   }
 }
+

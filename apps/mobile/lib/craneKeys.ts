@@ -12,6 +12,10 @@ export function buildCraneRenderKey(row: CraneListRow): string {
   ].join("|");
 }
 
+function buildCraneIdentityKey(row: CraneListRow): string {
+  return [row.craneId, row.vesselName || "-", row.source, row.seenAt].join("|");
+}
+
 function findDuplicates(values: string[]): string[] {
   const counts = new Map<string, number>();
   for (const value of values) {
@@ -27,15 +31,15 @@ export function reportDuplicateCraneRows(rows: CraneListRow[]): void {
     return;
   }
 
-  const duplicateCraneIds = findDuplicates(rows.map((row) => row.craneId));
+  const duplicateIdentityKeys = findDuplicates(rows.map((row) => buildCraneIdentityKey(row)));
   const duplicateRenderKeys = findDuplicates(rows.map((row) => buildCraneRenderKey(row)));
 
-  if (!duplicateCraneIds.length && !duplicateRenderKeys.length) {
+  if (!duplicateIdentityKeys.length && !duplicateRenderKeys.length) {
     return;
   }
 
   console.warn("[CraneStatus] duplicate rows detected", {
-    duplicateCraneIds,
+    duplicateIdentityKeys,
     duplicateRenderKeys,
     rowCount: rows.length,
   });

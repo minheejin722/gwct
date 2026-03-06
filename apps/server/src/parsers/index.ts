@@ -7,7 +7,7 @@ import {
   parseGwctWorkStatus,
 } from "./gwct.js";
 import type { NormalizedSnapshotBundle } from "./types.js";
-import { parseYsForecast, parseYsNotice } from "./ys.js";
+import { parseYsForecast, parseYsNews, parseYsNotice } from "./ys.js";
 
 export function parseBySource(source: SourceId, html: string, seenAt: string): NormalizedSnapshotBundle {
   switch (source) {
@@ -25,6 +25,8 @@ export function parseBySource(source: SourceId, html: string, seenAt: string): N
       return parseYsForecast(html, seenAt, source);
     case "ys_notice":
       return parseYsNotice(html, seenAt, source);
+    case "ys_news":
+      return parseYsNews(html, seenAt, source);
     default:
       return {
         vessels: [],

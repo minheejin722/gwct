@@ -969,3 +969,231 @@
   - `npx expo config --type public --json` includes `["expo-notifications",{"enableBackgroundRemoteNotifications":true}]` ✅
 - Constraint:
   - Expo headless background notifications intentionally omit presentational fields. That means `Banner off` now suppresses background/terminated OS banners consistently, but those headless pushes also do not carry sound or other visible presentation by default.
+
+## Vessel Schedule H-Page Alignment Plan (2026-03-07)
+- [x] Inspect the current schedule parser, ETA change formatter, `/api/vessels/live` route, mobile `Vessel Schedule` screen, and the live `m=H&s=A` page structure/colors.
+- [x] Return explicit watch-window order, row color, and KST ETA/ETD display fields from the server so the mobile screen no longer relies on raw ISO strings or implicit DB row order.
+- [x] Update ETA change messaging so crossed-date delays include both the relative day label and the exact hour/minute delta.
+- [x] Refresh the mobile `Vessel Schedule` UI to match the live yellow/cyan row cues and the corrected ETA/ETD rendering.
+- [x] Run relevant parser/ETA regression tests plus typecheck and record the review.
+
+## Vessel Schedule H-Page Alignment Review
+- Root cause:
+  - The live `m=H&s=A` page really does use the watch window starting at the first yellow row and then continuing into cyan rows, but the mobile screen was not rendering any of that row-color context.
+  - The parser was already extracting `입항 일시` and `출항 일시` from the correct live columns, but the mobile screen displayed raw ISO UTC strings. That made values like `2026-03-06T05:00:00.000Z` look wrong next to the H-page row `2026/03/06 14:00`.
+  - `/api/vessels/live` also relied on implicit DB row order instead of an explicit watch-window index, so the UI did not have a guaranteed `1..11` presentation order tied to the H-page rows.
+- Fix:
+  - Added a server-side vessel live-row builder that returns:
+    - explicit `watchIndex`
+    - `rowColor`
+    - `etaDisplay`
+    - `etdDisplay`
+    - latest ETA change details with display-formatted previous/current ETA
+  - Sorted vessel live rows by the parsed watch-window index and capped the response to 11 rows.
+  - Updated shared ETA messaging so crossed-date delays now include both the relative day label and the exact duration, for example:
+    - `내일로 0시간 50분 더 늦게 입항 예정입니다.`
+  - Refreshed the mobile `Vessel Schedule` screen so yellow rows use a soft yellow card tone, cyan rows use a soft sky-blue tone, and ETA/ETD render in the exact `YYYY/MM/DD HH:mm` format expected from the H-page.
+- Validation:
+  - Live `m=H&s=A` page confirmed via browser inspection:
+    - `bg_on` rows -> `rgb(254, 220, 143)` (yellow)
+    - `bg_yet` rows -> `rgb(167, 238, 255)` (cyan)
+    - Example row `SAWASDEE SIRIUS` shows `ETA 2026/03/06 14:00`, `ETD 2026/03/07 02:00`
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/schedule-focus.test.ts tests/gwct-eta-monitor.test.ts tests/vessels-live-rows.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Monitoring Menu Card Refresh Plan (2026-03-07)
+- [x] Inspect the current monitoring menu screen and reusable mobile card styles.
+- [x] Replace the plain stacked monitor entries with distinct, tappable card-style items while keeping the same routes.
+- [x] Preserve theme support and keep the layout compact enough for phone screens.
+- [x] Run mobile typecheck and record the review.
+
+## Monitoring Menu Card Refresh Review
+- Root cause:
+  - The monitoring menu technically reused navigation items, but the entries read like bare stacked text because the screen lacked distinct per-item card hierarchy and tap affordances.
+  - The intro card and the monitor links also used nearly the same visual weight, so the actionable items did not stand out from the surrounding copy.
+- Fix:
+  - Reworked [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx) into a dedicated card list with one card per monitor route.
+  - Each card now has:
+    - a distinct icon badge
+    - stronger card border/shadow separation
+    - larger title/subtitle hierarchy
+    - a trailing chevron and small action pill so it reads as a tappable destination
+  - Kept all existing routes and monitor behavior unchanged; this is a UI-only refresh.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+
+## Crane Scheduled Note Removal Plan (2026-03-07)
+- [x] Inspect the crane status screen and confirm where the scheduled-state explanatory copy is rendered.
+- [x] Remove the scheduled explanatory copy while keeping the backend state badge and sorting behavior intact.
+- [x] Run mobile typecheck and record the review.
+
+## Crane Scheduled Note Removal Review
+- Root cause:
+  - The `작업 예정` card already exposes the resolved backend state through its badge, so repeating the full reasoning sentence inside every card added noise and made the list taller without adding new operator value.
+- Fix:
+  - Removed the scheduled-state explanatory sentence from [cranes.tsx](C:/coding/gwct/apps/mobile/app/cranes.tsx).
+  - Kept the existing `작업 예정` badge, sort order, and backend-derived state logic unchanged.
+  - Restored the file to clean UTF-8 source while applying the change so TypeScript parsing remains stable.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+
+## Crane Status F-Page Alignment Plan (2026-03-07)
+- [x] Inspect the current crane parser, GC latest snapshot, `/api/cranes/live`, and mobile crane UI to trace where GC189/190 got incorrect remaining values.
+- [x] Verify the live `m=F&s=A` table structure and confirm whether the work-status parser is misreading per-GC discharge/load columns.
+- [x] Fix the parser/API so empty GC rows stay empty and same GC numbers can appear as separate vessel rows when multiple vessels still have remaining work.
+- [x] Add regression tests for blank trailing GC columns and multi-vessel same-GC live rows.
+- [x] Run relevant tests/typecheck and record the review.
+
+## Crane Status F-Page Alignment Review
+- Root cause:
+  - The `gwct_work_status` parser was reading per-GC body cells using the first header-row index even though each `G/C nnn` header spans two body columns. That shifted later GC values to the right, so empty trailing columns like `GC189/GC190` inherited earlier cranes' remaining values.
+  - `/api/cranes/live` also collapsed the screen to one row per GC, so if multiple vessels legitimately retained the same GC number with remaining work, only one vessel row could survive.
+- Live verification:
+  - Browser inspection of the current `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A` confirmed the table uses a `G/C nnn` header row plus a second `작업 구분 / 양하 / 적하` row.
+  - Running the fixed parser against the live page now yields:
+    - `GC187 POS GUANGZHOU = 42 / 73 / 115`
+    - `GC188 POS GUANGZHOU = 51 / 98 / 149`
+    - `GC189 = null`
+    - `GC190 = null`
+- Fix:
+  - Updated [gwct.ts](C:/coding/gwct/apps/server/src/parsers/gwct.ts) so per-GC discharge/load cells are addressed as `1 + gcIndex * 2` and `2 + gcIndex * 2`.
+  - Updated [workState.ts](C:/coding/gwct/apps/server/src/services/gc/workState.ts) so `/api/cranes/live`:
+    - no longer revives empty `GC189/GC190` from misaligned work-status rows
+    - emits separate rows when multiple vessels still have remaining work for the same GC number
+  - Updated [cranes.tsx](C:/coding/gwct/apps/mobile/app/cranes.tsx) to sort same-GC rows by vessel name after state/GC ordering.
+  - Updated [craneKeys.ts](C:/coding/gwct/apps/mobile/lib/craneKeys.ts) so the dev duplicate detector no longer treats `same GC + different vessel` as an error by itself.
+- Conservative assumption:
+  - Equipment crew state exists only at physical GC level, not per-vessel level. When multiple vessel rows share one GC, the live API applies the same GC-level `active/scheduled` state to each row because the source data does not identify which vessel currently has the crew aboard.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-work-status-parser.test.ts tests/gc-work-state.test.ts tests/crane-live-rows.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd --workspace @gwct/server exec -- tsx` live parser/API spot checks for current `m=F&s=A` ✅
+
+
+## Yeosu Pilotage Monitor Audit Plan (2026-03-07)
+- [x] Inspect the current server Yeosu forecast/notice parser, semantic state logic, shared payload schema, and mobile weather UI.
+- [x] Verify the live YS Pilot site structure and look for additional official notice routes relevant to port-closing or pilotage suspension.
+- [x] Tighten the server/shared detection path if any suspension keywords, fallback notice sources, or debug payload fields are missing.
+- [x] Refresh the mobile Yeosu Pilotage UI so the forecast content is easier to scan.
+- [x] Run relevant tests/typecheck and record the review.
+
+## Yeosu Pilotage Monitor Audit Review
+- Current-state audit:
+  - The existing forecast parser already read both `배선팀근무` and `대기호출자`, and the semantic transition logic already prevented repeat alerts while the same suspended/normal state continued.
+  - The missing parts were elsewhere:
+    - board fallback only used `공지사항`, not `새소식`
+    - board parsing stopped at the first row and could miss a lower suspension headline under unrelated pinned notices
+    - board evidence was not stored with full `standbyCallText/semanticState/normalizedReason`
+    - live/mobile weather API could not show the same debug reason that the parser used
+- Live verification:
+  - Confirmed the live forecast status page still exposes `대기호출자` and `배선팀근무` as the operational signal fields.
+  - Confirmed the official board menu exposes both:
+    - `http://www.yspilot.co.kr/boards/lists/notice`
+    - `http://www.yspilot.co.kr/boards/lists/news`
+  - Live parser check on 2026-03-07 KST returned current forecast state `NORMAL` from:
+    - `배선팀근무 = ■김현후.염규일■조영훈.김희훈■홍상철.윤지환`
+    - `대기호출자 = ■1대기:LJ.LH`
+- Fix:
+  - Added `ys_news` as an official secondary source in shared schema, server env, source schedule, and parser routing.
+  - Rebuilt the YS parser so:
+    - forecast still combines `배선팀근무 + 대기호출자`
+    - suspend keywords cover broader variants such as `전면 도선 중단`, `도선업무 중단`, `도선 불가`, `기상 불량`, `PORT CLOSED`, `HARBOR CLOSED`, `입출항 통제`
+    - normal/resume keywords include `도선 재개`, `업무 재개`, `정상 운영`, `정상 배선`, `PORT OPEN`
+  - Reworked board parsing to scan recent visible rows instead of only the first board row, then choose the first recent actionable suspension/resume headline.
+  - Added a conservative stale-board guard:
+    - only board rows posted within 2 days are allowed to affect suspension semantics
+    - if no recent actionable row exists, the board headline is shown for reference but does not force `SUSPENDED`
+  - Added a shared effective-state helper so forecast + notice + news are merged with one rule set for both monitor service and API/UI.
+  - Persisted the missing weather snapshot fields in DB:
+    - `standbyCallText`
+    - `semanticState`
+    - `normalizedReason`
+  - Updated the mobile weather screen to show:
+    - resolved current state
+    - `배선팀근무`
+    - `대기호출자`
+    - normalized reason
+    - matched keyword chips
+    - separate `공지사항` / `새소식` evidence cards
+- Conservative assumption:
+  - Board list headlines are secondary insurance only, not a perpetual source of truth. To avoid historical notice titles keeping the port closed forever, only recent board rows (within 2 days) can influence the current semantic state.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run prisma:push` ✅
+  - `npm.cmd --workspace @gwct/server run prisma:generate` ✅
+  - backfilled existing `WeatherNoticeSnapshot.semanticState/standbyCallText` rows in SQLite ✅
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/weather-parser.test.ts tests/weather-diff.test.ts tests/yeosu-effective-state.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run test` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+  - live fetch + parser verification against current official `forecast/status`, `공지사항`, `새소식` pages ✅
+
+## Monitoring Menu Spacing Polish Plan (2026-03-07)
+- [x] Inspect the current monitoring menu card layout and identify the right-side chevron plus cramped vertical rhythm.
+- [ ] Remove the right-side chevron and rebalance icon/title/subtitle/pill spacing to use the screen height better.
+- [ ] Run mobile typecheck and record the review.
+
+## Monitoring Menu Spacing Polish Review
+- Root cause:
+  - The monitoring cards still carried a right-side chevron even though the whole card already reads as a tap target, so the extra affordance added visual noise.
+  - The icon, title, subtitle, and action pill were stacked too tightly near the top of each card, while the screen had spare vertical room below, making the overall composition feel top-heavy.
+- Fix:
+  - Removed the right-side chevron from [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx).
+  - Rebalanced the vertical rhythm by increasing:
+    - screen/card list spacing
+    - hero card padding/gap
+    - monitor card min height and padding
+    - icon badge size
+    - subtitle line height
+    - footer pill spacing
+  - Added a small `cardBody` wrapper so title/subtitle sit in a more centered vertical block instead of hugging the icon row.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Monitoring Menu First-Screen Rebalance Review
+- Root cause:
+  - The previous spacing pass improved breathing room, but the top `Monitoring Menu` hero consumed too much height relative to the actual action cards.
+  - That pushed the last visible `Open Settings` pill slightly below the first-screen fold, which looked clipped even though the screen was scrollable.
+- Fix:
+  - Tightened only the top-heavy parts in [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx):
+    - reduced overall content gap and bottom padding
+    - reduced hero card vertical padding and internal gap
+    - tightened hero subtitle line height and hint row spacing
+    - slightly reduced card list gap and monitor card min height
+    - slightly tightened title/subtitle/footer spacing inside monitor cards
+  - Kept the card-style structure, icon size, and chevron removal from the previous pass.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Monitoring Menu Icon-Title Micro Spacing Review
+- Root cause:
+  - After the first-screen rebalance, the icon block and the monitor title were still reading slightly too tight vertically even though the overall card height was now acceptable.
+- Fix:
+  - In [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx), added a very small separation between the icon row and the text block:
+    - `monitorCardTop.marginBottom = 2`
+    - `cardBody.marginTop = 2`
+  - Kept the rest of the first-screen fit unchanged so the last `Open Settings` pill still has room.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Settings Header Light-Background Plan (2026-03-07)
+- [x] Inspect the settings tab header source and confirm it inherits the shared blue tab header.
+- [x] Override only the settings tab header so it uses the light screen background with dark title text.
+- [x] Run mobile typecheck and record the review.
+
+## Settings Header Light-Background Review
+- Root cause:
+  - The `Settings` tab was inheriting the shared tab-header style from [apps/mobile/app/(tabs)/_layout.tsx](/c:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx), which sets a blue accent background and light title tint for every tab header by default.
+  - That made the settings screen top area visually inconsistent with its own light page background and reduced the contrast benefit of the app's dark status-bar content.
+- Fix:
+  - Overrode only the `settings` tab header options in [apps/mobile/app/(tabs)/_layout.tsx](/c:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) to use:
+    - `colors.screenBackground` as the header background
+    - `colors.primaryText` for the title tint/style
+    - `headerShadowVisible: false` so the top area reads as one continuous light surface
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
