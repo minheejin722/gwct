@@ -1,4 +1,4 @@
-﻿import type { SourceId } from "@gwct/shared";
+﻿import { formatGwctEtaAdjustmentMessage, type SourceId } from "@gwct/shared";
 import type { FastifyBaseLogger } from "fastify";
 import { env } from "../config/env.js";
 import type { Repository, AlertEventInput } from "../db/repository.js";
@@ -34,7 +34,9 @@ import {
   setYeosuObservedState,
   setYtMonitorState,
 } from "./monitorConfig/store.js";
+import { observeYtWorkSnapshot } from "./ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "./yeosu/effectiveState.js";
+import { saveVesselEtaAdjustmentRecord } from "./vessels/etaAdjustmentStore.js";
 
 export interface RunOptions {
   mode?: "live" | "fixture";
@@ -425,6 +427,8 @@ export class MonitorService {
         await this.repo.saveYtSnapshot(ytSnapshot);
       }
 
+      await observeYtWorkSnapshot(ytUnits, occurredAt);
+
       const ytTransition = detectYtCountStateEvents(ytSnapshot, monitorSettings.equipmentMonitor.yt, source, occurredAt, {
         sourceUrl,
         previousCount: previousYtSnapshot?.totalLoggedIn ?? null,
@@ -490,10 +494,12 @@ export class MonitorService {
       }
       seenSemanticFingerprints.add(semanticFingerprint);
 
-      const created = await this.repo.createAlertEvent(event);
-      emitted.push({ id: created.id, event });
-      if (shouldDispatchRealtimeNotification(event.type)) {
-        await this.notificationService.dispatch(created.id, event);
+      const preparedEvent = await this.decorateEtaAdjustmentEvent(event);
+      const created = await this.repo.createAlertEvent(preparedEvent);
+      await this.persistEtaAdjustmentState(preparedEvent);
+      emitted.push({ id: created.id, event: preparedEvent });
+      if (shouldDispatchRealtimeNotification(preparedEvent.type)) {
+        await this.notificationService.dispatch(created.id, preparedEvent);
       }
     }
 
@@ -502,6 +508,80 @@ export class MonitorService {
       await this.repo.saveEquipmentLoginEvents(emitted.map((item) => item.event));
       await this.repo.saveWeatherAlertEvents(emitted.map((item) => item.event));
     }
+  }
+
+  private async decorateEtaAdjustmentEvent(event: AlertEventInput): Promise<AlertEventInput> {
+    if (event.type !== "gwct_eta_changed") {
+      return event;
+    }
+
+    const vesselKey = typeof event.payload.vesselKey === "string" ? event.payload.vesselKey : null;
+    const vesselName = typeof event.payload.vesselName === "string" ? event.payload.vesselName.trim() : "";
+    const baseHumanMessage =
+      typeof event.payload.humanMessage === "string" ? event.payload.humanMessage : null;
+
+    if (!vesselKey || !baseHumanMessage) {
+      return event;
+    }
+
+    const adjustmentCount = (await this.repo.countGwctEtaAdjustments(vesselKey)) + 1;
+    const humanMessage = formatGwctEtaAdjustmentMessage(baseHumanMessage, adjustmentCount);
+
+    return {
+      ...event,
+      message: `${vesselName || vesselKey} ${humanMessage}`,
+      payload: {
+        ...event.payload,
+        adjustmentCount,
+        humanMessage,
+      },
+    };
+  }
+
+  private async persistEtaAdjustmentState(event: AlertEventInput): Promise<void> {
+    if (event.type !== "gwct_eta_changed") {
+      return;
+    }
+
+    const payload = event.payload;
+    const vesselKey = typeof payload.vesselKey === "string" ? payload.vesselKey : null;
+    const vesselName = typeof payload.vesselName === "string" ? payload.vesselName : null;
+    const previousEta = typeof payload.previousEta === "string" ? payload.previousEta : null;
+    const currentEta = typeof payload.currentEta === "string" ? payload.currentEta : null;
+    const deltaMinutes = typeof payload.deltaMinutes === "number" ? payload.deltaMinutes : null;
+    const direction = payload.direction === "earlier" || payload.direction === "later" ? payload.direction : null;
+    const humanMessage = typeof payload.humanMessage === "string" ? payload.humanMessage : null;
+    const adjustmentCount =
+      typeof payload.adjustmentCount === "number" && Number.isInteger(payload.adjustmentCount)
+        ? payload.adjustmentCount
+        : null;
+
+    if (
+      !vesselKey ||
+      !vesselName ||
+      !previousEta ||
+      !currentEta ||
+      deltaMinutes === null ||
+      !direction ||
+      !humanMessage ||
+      !adjustmentCount
+    ) {
+      return;
+    }
+
+    await saveVesselEtaAdjustmentRecord({
+      vesselKey,
+      vesselName,
+      voyage: typeof payload.voyage === "string" ? payload.voyage : null,
+      occurredAt: event.occurredAt,
+      previousEta,
+      currentEta,
+      deltaMinutes,
+      direction,
+      crossedDate: payload.crossedDate === true,
+      humanMessage,
+      adjustmentCount,
+    });
   }
 
   private parseGcNoFromEquipmentId(equipmentId: string): number | null {
@@ -587,4 +667,5 @@ export class MonitorService {
     );
   }
 }
+
 

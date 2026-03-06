@@ -1197,3 +1197,427 @@
     - `headerShadowVisible: false` so the top area reads as one continuous light surface
 - Validation:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## YT Driver Work-Time Plan (2026-03-07)
+- [x] Inspect the existing YT snapshot pipeline, persistence options, and mobile tab shell to choose a conservative server-backed session model.
+- [x] Add persisted YT work-time session and per-driver accumulation state with explicit day/night shift controls and break-time handling.
+- [x] Wire the server scrape/snapshot flow so YT active/stopped/logged-out transitions update accumulated work segments without inventing fake state.
+- [x] Add a bottom-tab personnel/work-time screen that starts day/night counting mode and shows ranked accumulated driver totals for the active shift.
+- [x] Run focused tests plus workspace typecheck, then document the review and remaining risks.
+
+## YT Driver Work-Time Review
+- Root cause:
+  - The repo already had real-time YT semantic state (`active/stopped/logged_out`) but no persisted concept of an operator-selected shift session, so there was nowhere to accumulate driver work segments across multiple YT relogins within one shift.
+  - The bottom tab shell also still spent its center slot on a dummy refresh tab, so there was no dedicated navigation point for an operator-focused work-time screen.
+- Fix:
+  - Added shared response schemas for YT work-time session state in [packages/shared/src/schemas/domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts).
+  - Added a conservative server-side single-session accumulator in:
+    - [apps/server/src/services/ytWorkTime/store.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/store.ts)
+    - [apps/server/src/services/ytWorkTime/service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts)
+  - Persistence choice:
+    - stored the current session in `apps/server/data/config/yt_work_time_session.json`
+    - kept it in `data/config` so cleanup does not delete it and so the server can resume the active shift state after restart
+  - Counting rules implemented:
+    - only `YT semanticState === active` with a real driver name opens or continues a work segment
+    - `stopped` or disappearance from named rows closes the open segment and accumulates elapsed work
+    - the same driver name later reappearing on any YT opens a new segment and adds to the same total
+    - lunch (`12:00~13:00`) and midnight (`00:00~01:00`) breaks are subtracted only for the overlapping portion of a segment
+    - shift sessions auto-complete at `19:00` for day mode or `07:00` for night mode
+  - Integrated the accumulator into the real scrape pipeline by updating it whenever `gwct_equipment_status` produces a new YT unit snapshot in [apps/server/src/services/monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts).
+  - Added explicit APIs in [apps/server/src/routes/api.ts](C:/coding/gwct/apps/server/src/routes/api.ts):
+    - `GET /api/yt/work-time`
+    - `POST /api/yt/work-time/start`
+  - Replaced the useless center refresh tab with a dedicated people/work tab in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx).
+  - Added the mobile screen [apps/mobile/app/worktime.tsx](C:/coding/gwct/apps/mobile/app/worktime.tsx) and stack registration in [apps/mobile/app/_layout.tsx](C:/coding/gwct/apps/mobile/app/_layout.tsx).
+- Conservative assumptions:
+  - There is exactly one global active YT work-time session at a time on the server. Starting a new day/night session replaces the previous saved session.
+  - Driver identity is keyed by normalized driver name because the source page does not expose a stronger unique driver ID.
+  - The user's `7시간` wording conflicts with the stated `07:00~19:00 / 19:00~07:00` windows plus one-hour break. I implemented actual accumulated active time inside the selected shift window with fixed break subtraction, and did not invent a separate 7-hour hard cap.
+  - If a driver logs in and reaches `stopped` before any scrape ever observed them as `active`, the system does not fabricate unseen work time; accumulation begins from the first captured active state after the mode starts.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-monitor.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run test` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+- Remaining risks:
+  - The work-time tab now lives in the `(tabs)` group and typechecks cleanly, but I did not run an Expo bundle/export in this pass.
+  - Because the source only exposes driver names, two different operators with the exact same displayed name would be merged into one accumulated total.
+
+## YT Work-Time Tab Visibility Fix Review
+- Root cause:
+  - The people/work-time screen had been created at [apps/mobile/app/worktime.tsx](C:/coding/gwct/apps/mobile/app/worktime.tsx) while the tab bar tried to expose a non-existent `worktime-tab` screen in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx).
+  - In Expo Router, that does not create a real bottom-tab destination. The visible tab must map to a real route file inside the `(tabs)` group.
+- Fix:
+  - Moved the screen into the tab group as [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx).
+  - Changed the tab registration from `worktime-tab` to the real route name `worktime` in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx).
+  - Removed the now-unneeded top-level stack registration for `worktime` in [apps/mobile/app/_layout.tsx](C:/coding/gwct/apps/mobile/app/_layout.tsx).
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+## Work Tab UI Polish Plan (2026-03-07)
+- [x] Inspect the current Work tab header and ranking-card layout for the blue header mismatch and right-edge overflow.
+- [x] Restyle the Work tab header to the light background, rename the requested labels, and compact the driver cards so date text stays inside the card.
+- [x] Run mobile typecheck and document the review plus the correction pattern.
+
+## Work Tab UI Polish Review
+- Root cause:
+  - The `Work` tab was still inheriting the default blue tab-header style, so the top area did not visually match the light page and kept the iPhone status-bar region on a darker surface.
+  - The ranking cards placed two full datetime strings in the same horizontal row (`시작 감지` / `최근 감지`), which made the right-side timestamp push beyond the card width on real devices.
+  - The card also carried secondary rows (`누적 분`, `중단사유`) that were not needed for the operator view and made the layout noisier than necessary.
+- Fix:
+  - Overrode only the `worktime` tab header in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) so it now uses the same light background and dark title style as the settings tab.
+  - Reworked the ranking cards in [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx):
+    - renamed `기사 누적 순위` to `YT 기사 일한 시간 순위`
+    - changed rank labels from `#1` style to `1등`, `2등`, and the final row to `꼴등`
+    - renamed `시작 감지` to `운전 시작`
+    - renamed the old recent-detection slot to `운전 중지`
+    - removed `누적 분` and `중단사유`
+    - moved `운전 시작` and `운전 중지` into separate vertical blocks so long timestamps stay inside the card
+    - kept only compact summary metadata (`YT`, `상태`, `세그먼트`) in the horizontal summary row
+- Conservative assumption:
+  - `운전 중지` now uses `lastWorkedAt` rather than `lastSeenAt`, because that matches the label semantics better and avoids showing an actively-updating detection timestamp as if it were a stop time.
+  - If there is only one driver in the list, the card stays `1등` instead of trying to show both `1등` and `꼴등`.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+## Work Tab Status Row Polish Plan (2026-03-07)
+- [x] Inspect the current Work card summary rows for status label text, stop-reason placement, and segment ordering.
+- [x] Update the Work cards so status is shown without a `상태` prefix, stop reason sits inline in red for non-active rows, and `세그먼트` moves to the last line.
+- [x] Run mobile typecheck and record the review plus the correction pattern.
+
+## Work Tab Status Row Polish Review
+- Root cause:
+  - The card summary row still rendered `상태 작업중` style text, which duplicated meaning the user already understood from the value itself.
+  - `세그먼트` was mixed into the same upper metadata area even though it is lower-priority operational detail.
+  - The previous layout had no clear inline slot for non-active-state stop reasons.
+- Fix:
+  - Updated [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) so the top summary row now shows:
+    - `YT <번호>`
+    - `작업중 / 중단 / 로그아웃` without an `상태` prefix
+    - red inline stop reason only when the latest state is `중단` or `로그아웃` and a reason exists
+  - Moved `세그먼트` to the last line of the card.
+  - Kept `운전 시작` / `운전 중지` as separate vertical blocks so long timestamps still stay inside the card.
+- Conservative assumption:
+  - `로그아웃` 상태는 source 데이터상 stop reason이 없을 수 있으므로, 사유가 실제로 있을 때만 옆에 표시하고 없으면 상태값만 보여줍니다.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+## Work Tab Rank/Segment Row Fix Plan (2026-03-07)
+- [x] Inspect the current Work card header and summary row to correct the misunderstood rank/segment placement.
+- [x] Move `세그먼트 N회` into the same summary line as `YT / 작업중|중단|로그아웃 / 중단사유` and enlarge the rank label beside the driver name.
+- [x] Run mobile typecheck and record the review plus the correction lesson.
+
+## Work Tab Rank/Segment Row Fix Review
+- Root cause:
+  - I misread the requested information hierarchy and moved `세그먼트` to a separate bottom line, even though the user explicitly wanted it to stay in the same compact metadata row as `YT 번호` and the current semantic state.
+  - The rank label also remained visually secondary above the name, instead of reading as a strong inline rank marker next to the driver name.
+- Fix:
+  - Updated [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) so each card now shows:
+    - driver name with a larger inline `1등 / 2등 / ... / 꼴등` label beside it
+    - one wrapped metadata row in the user-requested order:
+      - `YT <번호>`
+      - `작업중 / 중단 / 로그아웃`
+      - inline red `(<중단사유>)` when the state is non-active and a reason exists
+      - `세그먼트 N회`
+  - Removed the separate bottom `세그먼트` line.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Work Tab Logout Stop-Reason Persistence Plan (2026-03-07)
+- [x] Inspect the YT work-time accumulator and Work response to verify whether `logged_out` already preserves the last stop reason.
+- [x] If logout currently clears it, persist the final stop reason through the work-time session response and keep it visible inline beside `로그아웃`.
+- [x] Run relevant tests/typecheck and record the review plus the correction lesson.
+
+## Work Tab Logout Stop-Reason Persistence Review
+- Root cause:
+  - The YT work-time accumulator in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) cleared `latestStopReason` whenever a named YT driver disappeared from the current snapshot and was downgraded to `logged_out`.
+  - That meant a `중단 -> 완전 로그아웃` transition lost the final stop-reason trace, so the Work tab could not render `로그아웃 (<마지막 중단사유>)` even though the operator expected that final reason to remain visible.
+- Fix:
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so:
+    - when an active segment closes and the current named YT row no longer exists, `latestStopReason` falls back to the previously stored value instead of being nulled
+    - when a driver is already absent from the named snapshot and remains `logged_out`, the accumulator now preserves the last observed stop reason instead of clearing it
+  - The Work tab UI in [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) already rendered `logged_out` reasons inline when present, so no mobile layout change was needed.
+  - Added a regression test in [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) for `stopped("정비대기") -> logged_out` to prove the final stop reason survives logout.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Work Tab Stop-Time Visibility Plan (2026-03-07)
+- [x] Inspect the current Work card `운전 중지` rendering and confirm whether a stale last stop time survives after the driver is active again.
+- [x] Update the Work-tab display rules so previous stop times disappear once the driver is back to active with no current stop reason, while leaving segment accumulation unchanged.
+- [x] Run mobile/root typecheck and record the review plus the correction lesson.
+
+## Work Tab Stop-Time Visibility Review
+- Root cause:
+  - The Work card always rendered the `운전 중지` block from `lastWorkedAt` even after the driver had already started a new active segment.
+  - That made the card continue to show an old stop timestamp while the current semantic state was already back to `작업중`, which is stale and visually misleading.
+- Fix:
+  - Updated [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) so the `운전 중지` block is rendered only when the current driver state is inactive (`중단` or `로그아웃`).
+  - The underlying accumulated session data, `lastWorkedAt`, and `세그먼트` branching logic were left unchanged; only the stale display rule was removed from the UI.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Work Tab Logout Reason Recheck Plan (2026-03-07)
+- [x] Inspect the current Work UI and persisted/server YT work-time state to verify whether `logged_out` still drops the final stop reason in practice.
+- [x] If the reason is still being lost or old persisted state needs compatibility handling, implement the minimal fix at the correct layer.
+- [x] Run focused verification and record the review plus the correction lesson.
+
+## Work Tab Logout Reason Recheck Review
+- Root cause:
+  - The work-time accumulator in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) only matched current YT rows by `driverName`, so it could not see the real GWCT pattern where a YT row becomes `logged_out` with `driverName = null` but still retains a meaningful `stopReason`.
+  - The latest equipment snapshot file already contained many such rows (`driverName=null + stopReason=...`), but the Work session state ignored them and kept `latestStopReason: null`, so the Work tab could not show `로그아웃 (<사유>)`.
+  - Existing persisted work-session rows could also stay stale until another monitor-cycle observation updated them.
+- Fix:
+  - Added a `YT 번호 -> snapshot row` fallback map in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so the work-time accumulator now:
+    - still prefers `driverName` matching when available
+    - but falls back to the tracked `YT 번호` when the current row is driverless and `logged_out`
+    - preserves `stopReason` from that driverless logout row
+  - Updated [api.ts](C:/coding/gwct/apps/server/src/routes/api.ts) so `GET /api/yt/work-time` first reapplies the latest equipment snapshot through `observeYtWorkSnapshot(...)` before materializing the response. That makes existing sessions pick up the missing logout reason on the next screen refresh instead of waiting for a future scrape cycle.
+  - Added a regression test in [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) for `driverName=null, semanticState=logged_out, stopReason=...`.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Work Tab Stop-Reason Plain Text Plan (2026-03-07)
+- [x] Locate the current Work-tab inline reason rendering and confirm the parentheses are coming from the mobile UI.
+- [x] Remove the parentheses so stopped/logged_out reasons render as plain red text after the state label.
+- [x] Run mobile/workspace typecheck and record the review plus the correction lesson.
+
+## Work Tab Stop-Reason Plain Text Review
+- Root cause:
+  - The Work card UI in [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) was wrapping the inline stop reason with a literal `(${...})` string, so even though the layout and red emphasis were correct, the user still saw bracketed text.
+- Fix:
+  - Removed the literal parentheses from the inline reason render path.
+  - Stopped/logged-out rows now render as `중단 사유텍스트` or `로그아웃 사유텍스트`, with the reason still colored red.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## YT Work-Time Segment Accumulation Audit Plan (2026-03-07)
+- [x] Inspect the current YT work-time accumulator and existing tests against the required segment rules:
+  - stop/logout closes the current segment immediately
+  - same driver name relogin opens a new segment and keeps accumulating
+  - same-YT driver handoff closes the old driver and starts the new driver separately
+  - same driver relogin on a different YT still accumulates into the same driver total
+- [x] If any backend path is missing or inaccurate, implement the minimal server-side fix and add deterministic regression tests for the exact scenarios.
+- [x] Run focused server tests plus typecheck, then document the review and any fix.
+
+## YT Work-Time Segment Accumulation Audit Review
+- Audit result:
+  - The core accumulation model in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) already matched the required backbone:
+    - `active -> stopped/logged_out` closes the current segment immediately via `closeSegment(...)`
+    - the worked duration is added to `totalWorkedMs`
+    - the next time the same normalized `driverName` appears as `active`, a new `currentSegmentStartedAt` opens and accumulation resumes on top of the old total
+    - this works even if the driver comes back on a different `YT 번호`, because the active-unit lookup is keyed by normalized driver name
+- Problem found:
+  - The recent fix for `driverName=null + logged_out + stopReason` added a `YT 번호` fallback, but it was broad enough that a same-YT driver handoff could let the previous driver's record read the new driver's active row.
+  - That would make `같은 YT 교대` ambiguous in the accumulator, which conflicts with the user's required behavior of:
+    - old driver segment closes
+    - new driver starts as a separate person
+- Fix:
+  - Tightened the fallback in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so the `YT 번호` fallback is only used for driverless rows.
+  - That preserves the needed `logged_out + stopReason` recovery path, while preventing a new active driver on the same YT from being mistaken for the old driver's current state.
+  - Added deterministic regression tests in [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts):
+    - same driver relogin on a different YT keeps accumulating into one driver total
+    - same-YT handoff closes the previous driver and starts the new driver separately
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+
+## YT Work-Time Precision Verification Plan (2026-03-07)
+- [x] Inspect the YT work-time accumulator and response schema to determine whether the backend stores milliseconds/seconds or only whole minutes.
+- [x] Run a focused execution check to verify whether elapsed work shorter than one minute is still preserved in the accumulated value.
+- [x] Record the verification result clearly, including whether the current UI exposes seconds or only rounded minutes.
+
+## YT Work-Time Precision Verification Review
+- Verification result:
+  - The backend accumulator already stores work duration in milliseconds, not just whole minutes.
+  - Evidence in [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts):
+    - `effectiveWorkedMs(...)` computes raw `Date.getTime()` differences in milliseconds
+    - `closeSegment(...)` adds that raw value into `totalWorkedMs`
+    - `YTWorkDriverSummary` exposes both `totalWorkedMs` and `totalWorkedMinutes`
+  - Evidence in [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts):
+    - `totalWorkedMs`
+    - `totalWorkedMinutes`
+    - `totalWorkedLabel`
+- Focused execution check:
+  - Ran an inline `tsx` verification against the real accumulator:
+    - after `45.500초` of live time:
+      - `totalWorkedMs = 45500`
+      - `totalWorkedMinutes = 0`
+      - `totalWorkedLabel = "0시간 0분"`
+    - after stopping at `65.432초`:
+      - `totalWorkedMs = 65432`
+      - `totalWorkedMinutes = 1`
+      - `totalWorkedLabel = "0시간 1분"`
+- Conclusion:
+  - 초단위 누적 자체는 이미 되고 있습니다. 정확히는 밀리초 단위로 저장됩니다.
+  - 다만 현재 앱 UI는 [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx)에서 `driver.totalWorkedLabel`만 사용하므로, 화면에는 분 단위로만 보입니다.
+  - 즉:
+    - 누적 정밀도: `ms` 수준으로 이미 구현됨
+    - 현재 표시 정밀도: `분` 수준
+
+## Vessel ETA Change Verification Plan (2026-03-07)
+- [x] Inspect the current server/shared/mobile code paths for `gwct_eta_changed` to verify that ETA earlier/later changes generate the intended event payload and UI display.
+- [x] Run focused ETA-related tests to confirm the implementation is active without modifying code.
+- [x] Record the verification result, including what is implemented on the server and what is shown in the Vessel Schedule screen.
+
+## Vessel ETA Change Verification Review
+- Verification result:
+  - Yes. The repo is currently implemented so that meaningful ETA changes trigger a dedicated `gwct_eta_changed` event, and the Vessel Schedule screen shows that change directly under the affected vessel row.
+- Server event generation:
+  - [diff.ts](C:/coding/gwct/apps/server/src/engine/diff.ts)
+    - compares normalized ETA values only
+    - skips when previous and current ETA are semantically identical
+    - skips when either side is missing
+    - emits `gwct_eta_changed` with:
+      - `previousEta`
+      - `currentEta`
+      - `deltaMinutes`
+      - `direction`
+      - `crossedDate`
+      - `humanMessage`
+  - The human message text comes from [eta.ts](C:/coding/gwct/packages/shared/src/events/eta.ts), which formats:
+    - same-day earlier: `종전보다 X시간 Y분 더 일찍 입항 예정입니다.`
+    - same-day later: `종전보다 X시간 Y분 더 늦게 입항 예정입니다.`
+    - crossed date later: `내일로 ... 더 늦게 입항 예정입니다.` and more general relative-day wording
+- Mobile Vessel Schedule display:
+  - [vessels.tsx](C:/coding/gwct/apps/mobile/app/vessels.tsx)
+    - renders `ETA` / `ETD`
+    - if `latestEtaChange` exists, shows the ETA-change message under the vessel card
+    - colors it by direction:
+      - `earlier` = red tone
+      - `later` = blue tone
+  - [liveRows.ts](C:/coding/gwct/apps/server/src/services/vessels/liveRows.ts)
+    - attaches the latest `gwct_eta_changed` alert to the matching vessel row
+    - formats previous/current ETA display strings for the UI
+- Focused verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/vessels-live-rows.test.ts tests/schedule-focus.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+- What those tests prove:
+  - [gwct-eta-monitor.test.ts](C:/coding/gwct/apps/server/tests/gwct-eta-monitor.test.ts)
+    - same-day later -> event emitted with `direction=later`
+    - same-day earlier -> event emitted with `direction=earlier`
+    - next-day rollover -> event emitted with `crossedDate=true` and `내일로 ...` message
+    - identical normalized ETA -> no event
+  - [schedule-focus.test.ts](C:/coding/gwct/apps/server/tests/schedule-focus.test.ts)
+    - only ETA changes for the same voyage emit `gwct_eta_changed`
+  - [vessels-live-rows.test.ts](C:/coding/gwct/apps/server/tests/vessels-live-rows.test.ts)
+    - Vessel Schedule rows receive the latest ETA change payload and renderable previous/current ETA display values
+
+## ETA Adjustment Count Plan (2026-03-07)
+- [x] Inspect the current ETA change event pipeline, alert history storage, and Vessel Schedule UI wiring to find the cleanest place to carry an adjustment count.
+- [x] Implement the minimal server/shared/mobile changes so the first ETA change keeps the plain message, while the 2nd+ changes append `N번째 ETA 조정` and keep comparing against the most recently confirmed ETA.
+- [x] Run focused ETA tests/typecheck and document the review plus any new lesson.
+## ETA Adjustment Count Review
+- Root cause:
+  - ETA change detection already compared the current scrape against the immediately previous ETA snapshot, so delta calculation was correct.
+  - What was missing was persistent adjustment ordinal metadata. Every ETA change message stayed in the base form, so 2nd/3rd/later ETA changes were indistinguishable in alerts and Vessel Schedule UI.
+- Implementation:
+  - Added shared helper in [eta.ts](C:/coding/gwct/packages/shared/src/events/eta.ts) to append `N번째 ETA 조정` only from the 2nd change onward, while keeping the base ETA delta message intact.
+  - Extended [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts) so `gwct_eta_changed` payload can carry `adjustmentCount`.
+  - Added [countGwctEtaAdjustments()](C:/coding/gwct/apps/server/src/db/repository.ts) to count prior ETA-change events per `vesselKey` from persisted vessel change history.
+  - Updated [monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) so each newly emitted `gwct_eta_changed` event is decorated before persistence/notification:
+    - first change keeps the original message
+    - 2nd+ changes become `... 예정입니다. 2번째 ETA 조정`, `... 3번째 ETA 조정`, etc.
+  - Updated [liveRows.ts](C:/coding/gwct/apps/server/src/services/vessels/liveRows.ts) so Vessel Schedule rows expose `adjustmentCount` and keep rendering the ordinal suffix even for older alerts that predate the payload field, using recent alert history as a fallback.
+  - Updated [vessels.tsx](C:/coding/gwct/apps/mobile/app/vessels.tsx) response typing to match the new `adjustmentCount` field.
+- Focused verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/vessels-live-rows.test.ts tests/monitor-service-eta-adjustment.test.ts tests/schedule-focus.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [monitor-service-eta-adjustment.test.ts](C:/coding/gwct/apps/server/tests/monitor-service-eta-adjustment.test.ts): verifies 2nd/3rd ETA changes are decorated with the correct ordinal suffix and first change stays plain.
+  - [vessels-live-rows.test.ts](C:/coding/gwct/apps/server/tests/vessels-live-rows.test.ts): verifies Vessel Schedule rows surface `2번째 ETA 조정` from ETA change history.
+- Result:
+  - First ETA change: base message only.
+  - Second and later ETA changes: base message plus inline `N번째 ETA 조정`.
+  - Delta calculation remains against the most recently confirmed ETA because the compare logic still diffs previous snapshot vs current snapshot.
+
+## ETA Adjustment Persistence Plan (2026-03-07)
+- [x] Inspect the current event-clear path and ETA message source to identify every coupling between Event history and Vessel Schedule ETA adjustment display.
+- [x] Implement a dedicated ETA adjustment state store that survives event-log clearing, wire server emission/live rows to it, and exclude it from event-clear behavior.
+- [x] Run focused tests/typecheck, add regression coverage for clear-events behavior, and document the review.
+
+## ETA Adjustment Persistence Review
+- Root cause:
+  - The visible ETA message under Vessel Schedule rows still depended on event-history-backed sources.
+  - `DELETE /api/events` clears `alertEvent` and related event tables, so `N번째 ETA 조정` and the last displayed ETA message could disappear even though ETA compare logic itself still worked.
+- Implementation:
+  - Added dedicated ETA-adjustment state storage in [etaAdjustmentStore.ts](C:/coding/gwct/apps/server/src/services/vessels/etaAdjustmentStore.ts) under `apps/server/data/config`.
+  - Updated [monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) to persist each emitted `gwct_eta_changed` event into that dedicated store after the event row is created.
+  - Updated [liveRows.ts](C:/coding/gwct/apps/server/src/services/vessels/liveRows.ts) so Vessel Schedule rows prefer the dedicated ETA-adjustment store and only fall back to recent alerts if the store has no record yet.
+  - Updated [api.ts](C:/coding/gwct/apps/server/src/routes/api.ts) so `/api/vessels/live` loads ETA-adjustment state directly instead of relying only on event history.
+  - `DELETE /api/events` was intentionally left unchanged, so event-history clearing does not touch the dedicated ETA-adjustment store.
+- Focused verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/vessels-live-rows.test.ts tests/monitor-service-eta-adjustment.test.ts tests/schedule-focus.test.ts tests/events-clear-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [events-clear-api.test.ts](C:/coding/gwct/apps/server/tests/events-clear-api.test.ts): verifies `/api/vessels/live` still returns the persisted ETA message and `adjustmentCount` after `DELETE /api/events`.
+- Result:
+  - Event log clear and Vessel Schedule ETA adjustment display are now separated.
+  - `종전보다 ...` message, `N번째 ETA 조정`, and the latest ETA delta context remain available after clearing the Events history.
+## Events Header Tone Plan (2026-03-07)
+- [ ] Inspect the tab header options for the Events screen and identify where its header colors diverge from the light background pattern.
+- [ ] Update only the Events tab header styling so the title and iPhone status indicators stay readable on the light page background.
+- [ ] Run mobile typecheck and record the result.
+## Events Header Tone Review
+- Implementation:
+  - Updated [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) so the hidden `alerts` tab uses the same light header override pattern as `Work` and `Settings`.
+  - Header background now follows `colors.screenBackground`, title tint follows `colors.primaryText`, and header shadow is removed.
+- Result:
+  - The `Events` screen no longer uses the dark blue top bar.
+  - The page header blends into the light background and keeps the iPhone status-bar glyphs readable in dark text.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## Events Tone Balance Plan (2026-03-07)
+- [ ] Inspect the Events screen background, card/button tones, and current tab-header override to identify the smallest change that reduces the visible boundary.
+- [ ] Adjust the Events header/body palette so the transition matches the rest of the app more closely without affecting other tabs.
+- [ ] Run mobile typecheck and record the review plus the UI lesson.
+## Events Tone Balance Review
+- Root cause:
+  - The `alerts` header was switched to the light tab-header palette, but [alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx) still used hard-coded blue-tinted background and card colors.
+  - That created a visible seam between the light header and the cooler body background.
+- Implementation:
+  - Updated [alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx) to use [useAppPreferences()](C:/coding/gwct/apps/mobile/lib/appPreferences.tsx) and the shared app palette.
+  - `screen`, filter chips, cards, and text tones now follow the same light-theme colors used by the other home/session screens.
+  - Kept the destructive clear button red so the action remains obvious.
+- Result:
+  - The `Events` header and the body now sit in the same light-tone family.
+  - The boundary under the header is reduced without changing the actual Events functionality.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## Work Copy Cleanup Plan (2026-03-07)
+- [ ] Find the Work screen helper copy that contains the quoted comma after `시작하면`.
+- [ ] Remove only that punctuation so the sentence reads naturally, without changing the surrounding behavior or layout.
+- [ ] Run mobile typecheck and record the review.
+## Work Copy Cleanup Review
+- Implementation:
+  - Removed the comma after `시작하면` in [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx).
+- Result:
+  - The Work helper sentence now reads more naturally without the extra punctuation.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## Monitoring Copy Cleanup Plan (2026-03-07)
+- [ ] Find the Monitoring Menu helper copy that still wraps Confirm/Cancel in quotes.
+- [ ] Remove only the quote characters so the sentence reads cleanly without changing layout or behavior.
+- [ ] Run mobile typecheck and record the review.
+## Monitoring Copy Cleanup Review
+- Implementation:
+  - Removed the quote/backtick characters around `Confirm` and `Cancel` in [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx).
+- Result:
+  - The Monitoring Menu helper sentence now reads as plain `Confirm` / `Cancel` text without decorative punctuation.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## Monitoring Comma Cleanup Review
+- Implementation:
+  - Removed the comma after `저장/활성화` in [monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx).
+- Result:
+  - The Monitoring helper sentence now reads without the extra punctuation.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅

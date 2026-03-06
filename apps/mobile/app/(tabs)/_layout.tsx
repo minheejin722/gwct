@@ -50,11 +50,14 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="refresh-tab"
+        name="worktime"
         options={{
-          title: "Refresh",
-          href: "/",
-          tabBarIcon: ({ color }) => <Ionicons name="refresh" size={28} color={color} />,
+          title: "Work",
+          headerStyle: { backgroundColor: colors.screenBackground },
+          headerTintColor: colors.primaryText,
+          headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
+          headerShadowVisible: false,
+          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={26} color={color} />,
         }}
       />
 
@@ -63,7 +66,7 @@ export default function TabLayout() {
         options={{
           title: "Status",
           href: "/equipment",
-          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="construct-outline" size={24} color={color} />,
         }}
       />
 
@@ -79,7 +82,17 @@ export default function TabLayout() {
         }}
       />
 
-      <Tabs.Screen name="alerts" options={{ href: null, title: "Events" }} />
+      <Tabs.Screen
+        name="alerts"
+        options={{
+          href: null,
+          title: "Events",
+          headerStyle: { backgroundColor: colors.screenBackground },
+          headerTintColor: colors.primaryText,
+          headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
+          headerShadowVisible: false,
+        }}
+      />
       <Tabs.Screen name="two" options={{ href: null }} />
     </Tabs>
   );

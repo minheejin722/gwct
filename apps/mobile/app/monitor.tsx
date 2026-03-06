@@ -43,7 +43,7 @@ export default function MonitorMenuScreen() {
       <View style={styles.heroCard}>
         <Text style={styles.heroTitle}>Monitoring Menu</Text>
         <Text style={styles.subtitle}>
-          모니터별로 들어가서 값을 조정하고 `Confirm`으로 저장/활성화, `Cancel`로 비활성화합니다.
+          모니터별로 들어가서 값을 조정하고 Confirm으로 저장/활성화 Cancel로 비활성화합니다.
         </Text>
         <View style={styles.heroHintRow}>
           <View style={[styles.heroHintDot, { backgroundColor: colors.accent }]} />

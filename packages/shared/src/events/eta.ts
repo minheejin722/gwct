@@ -9,6 +9,8 @@ export interface GwctEtaChangeSummary {
   humanMessage: string;
 }
 
+const ETA_ADJUSTMENT_SUFFIX_PATTERN = /\s+\d+번째 ETA 조정$/u;
+
 interface ParsedEta {
   year: number;
   month: number;
@@ -80,6 +82,14 @@ function formatRelativeDayLabel(dayShift: number): string {
     return "그제";
   }
   return `${Math.abs(dayShift)}일 전`;
+}
+
+export function formatGwctEtaAdjustmentMessage(humanMessage: string, adjustmentCount: number): string {
+  const baseMessage = humanMessage.replace(ETA_ADJUSTMENT_SUFFIX_PATTERN, "").trim();
+  if (!Number.isInteger(adjustmentCount) || adjustmentCount < 2) {
+    return baseMessage;
+  }
+  return `${baseMessage} ${adjustmentCount}번째 ETA 조정`;
 }
 
 export function summarizeGwctEtaChange(previousEta: string, currentEta: string): GwctEtaChangeSummary | null {

@@ -148,6 +148,58 @@ export const YTUnitTransitionKindSchema = z.enum([
 ]);
 export type YTUnitTransitionKind = z.infer<typeof YTUnitTransitionKindSchema>;
 
+export const YTWorkShiftModeSchema = z.enum(["day", "night"]);
+export type YTWorkShiftMode = z.infer<typeof YTWorkShiftModeSchema>;
+
+export const YTWorkSessionStatusSchema = z.enum(["active", "completed"]);
+export type YTWorkSessionStatus = z.infer<typeof YTWorkSessionStatusSchema>;
+
+export const YTWorkSessionBreakSchema = z.object({
+  label: z.string(),
+  startAt: z.string(),
+  endAt: z.string(),
+});
+export type YTWorkSessionBreak = z.infer<typeof YTWorkSessionBreakSchema>;
+
+export const YTWorkDriverSummarySchema = z.object({
+  driverKey: z.string(),
+  driverName: z.string(),
+  latestYtNo: z.string().nullable(),
+  activeYtNo: z.string().nullable(),
+  totalWorkedMs: z.number().int().nonnegative(),
+  totalWorkedMinutes: z.number().int().nonnegative(),
+  totalWorkedLabel: z.string(),
+  currentSegmentStartedAt: z.string().nullable(),
+  latestState: YTSemanticStateSchema,
+  latestStopReason: z.string().nullable(),
+  firstSeenAt: z.string(),
+  lastSeenAt: z.string(),
+  lastWorkedAt: z.string().nullable(),
+  segments: z.number().int().nonnegative(),
+});
+export type YTWorkDriverSummary = z.infer<typeof YTWorkDriverSummarySchema>;
+
+export const YTWorkSessionSchema = z.object({
+  mode: YTWorkShiftModeSchema,
+  status: YTWorkSessionStatusSchema,
+  shiftWindowStartedAt: z.string(),
+  startedAt: z.string(),
+  endsAt: z.string(),
+  completedAt: z.string().nullable(),
+  observedAt: z.string(),
+  timezone: z.string(),
+  breaks: z.array(YTWorkSessionBreakSchema),
+  drivers: z.array(YTWorkDriverSummarySchema),
+});
+export type YTWorkSession = z.infer<typeof YTWorkSessionSchema>;
+
+export const YTWorkSessionResponseSchema = z.object({
+  session: YTWorkSessionSchema.nullable(),
+  latestYtCapturedAt: z.string().nullable(),
+  hasLiveSnapshot: z.boolean(),
+});
+export type YTWorkSessionResponse = z.infer<typeof YTWorkSessionResponseSchema>;
+
 export const YTUnitStatusChangedPayloadSchema = z.object({
   type: z.literal("yt_unit_status_changed"),
   transitionKind: YTUnitTransitionKindSchema,
@@ -184,6 +236,7 @@ export const GwctEtaChangedPayloadSchema = z.object({
   direction: GwctEtaDirectionSchema,
   crossedDate: z.boolean(),
   humanMessage: z.string(),
+  adjustmentCount: z.number().int().min(1).optional(),
   indexInWatchWindow: z.number().int().nullable(),
   trackingCount: z.number().int().min(1).max(11),
   sourceUrl: z.string(),

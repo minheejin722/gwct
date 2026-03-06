@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, RefreshControl, Pressable, ScrollView, StyleS
 import EventSource from "react-native-sse";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { API_URLS } from "../../lib/config";
+import { useAppPreferences } from "../../lib/appPreferences";
 
 type EventFilter = "all" | "yt" | "stopReason" | "loginChange" | "weather";
 
@@ -92,6 +93,8 @@ function fmtTime(value: string): string {
 }
 
 export default function AlertsScreen() {
+  const { colors } = useAppPreferences();
+  const styles = createStyles(colors);
   const [filter, setFilter] = useState<EventFilter>("all");
   const [clearing, setClearing] = useState(false);
   const { data, loading, error, refresh, setData } = useEndpoint<EventsResponse>(`${API_URLS.events}?limit=200`, {
@@ -224,61 +227,63 @@ export default function AlertsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 16, gap: 10 },
-  error: {
-    backgroundColor: "#fde8e8",
-    borderWidth: 1,
-    borderColor: "#e8a8a8",
-    color: "#8b1a1a",
-    padding: 10,
-    borderRadius: 10,
-    fontWeight: "700",
-  },
-  clearButton: {
-    backgroundColor: "#9f1d1d",
-    borderRadius: 10,
-    minHeight: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  clearButtonDisabled: {
-    opacity: 0.7,
-  },
-  clearButtonText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  filterButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#bfd3e7",
-    backgroundColor: "#f7fbff",
-  },
-  filterActive: {
-    backgroundColor: "#0f3b63",
-    borderColor: "#0f3b63",
-  },
-  filterText: { fontSize: 12, color: "#245074", fontWeight: "600" },
-  filterTextActive: { color: "#fff" },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    padding: 12,
-    gap: 4,
-  },
-  time: { fontSize: 12, color: "#5f7890" },
-  type: { fontSize: 12, color: "#0f3b63", fontWeight: "700" },
-  summary: { fontSize: 15, color: "#123454", fontWeight: "700" },
-  message: { fontSize: 13, color: "#2d5478" },
-  debug: { fontSize: 12, color: "#506c85" },
-  empty: { textAlign: "center", marginTop: 40, color: "#5f7890" },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 16, gap: 10 },
+    error: {
+      backgroundColor: "#fde8e8",
+      borderWidth: 1,
+      borderColor: "#e8a8a8",
+      color: "#8b1a1a",
+      padding: 10,
+      borderRadius: 10,
+      fontWeight: "700",
+    },
+    clearButton: {
+      backgroundColor: "#9f1d1d",
+      borderRadius: 10,
+      minHeight: 42,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    clearButtonDisabled: {
+      opacity: 0.7,
+    },
+    clearButtonText: {
+      color: "#ffffff",
+      fontSize: 14,
+      fontWeight: "800",
+    },
+    filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    filterButton: {
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceBackground,
+    },
+    filterActive: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    filterText: { fontSize: 12, color: colors.accentMuted, fontWeight: "600" },
+    filterTextActive: { color: colors.surfaceBackground },
+    card: {
+      backgroundColor: colors.surfaceBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 12,
+      gap: 4,
+    },
+    time: { fontSize: 12, color: colors.secondaryText },
+    type: { fontSize: 12, color: colors.accent, fontWeight: "700" },
+    summary: { fontSize: 15, color: colors.primaryText, fontWeight: "700" },
+    message: { fontSize: 13, color: colors.accentMuted },
+    debug: { fontSize: 12, color: colors.secondaryText },
+    empty: { textAlign: "center", marginTop: 40, color: colors.secondaryText },
+  });
+}

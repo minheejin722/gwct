@@ -109,4 +109,43 @@ describe("vessel live rows", () => {
       humanMessage: "내일로 26시간 0분 더 늦게 입항 예정입니다.",
     });
   });
+
+  it("shows nth eta adjustment label from recent eta change history", () => {
+    const rows = [
+      vessel({
+        vesselKey: "SWSI-0002",
+        vesselName: "SAWASDEE SIRIUS",
+        voyage: "SWSI-0002",
+        eta: "2026-03-06T07:00:00.000Z",
+        etd: "2026-03-06T17:00:00.000Z",
+        watchIndex: 1,
+        rowColor: "yellow",
+      }),
+    ];
+
+    const newestAlert = etaAlert(
+      "SWSI-0002",
+      "2026-03-06T15:00",
+      "2026-03-06T16:00",
+      "종전보다 1시간 0분 더 늦게 입항 예정입니다.",
+    );
+    newestAlert.occurredAt = "2026-03-07T00:06:00.000Z";
+
+    const olderAlert = etaAlert(
+      "SWSI-0002",
+      "2026-03-06T14:00",
+      "2026-03-06T15:00",
+      "종전보다 1시간 0분 더 늦게 입항 예정입니다.",
+    );
+    olderAlert.id = "evt:SWSI-0002:older";
+    olderAlert.occurredAt = "2026-03-07T00:05:00.000Z";
+
+    const result = buildVesselLiveRows(rows, [newestAlert, olderAlert]);
+
+    expect(result[0]?.latestEtaChange).toMatchObject({
+      eventId: "evt:SWSI-0002",
+      adjustmentCount: 2,
+      humanMessage: "종전보다 1시간 0분 더 늦게 입항 예정입니다. 2번째 ETA 조정",
+    });
+  });
 });

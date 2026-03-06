@@ -445,6 +445,15 @@ export class Repository {
     });
   }
 
+  async countGwctEtaAdjustments(vesselKey: string): Promise<number> {
+    return prisma.vesselScheduleChangeEvent.count({
+      where: {
+        changeType: "gwct_eta_changed",
+        vesselKey,
+      },
+    });
+  }
+
   async saveVesselChangeEvents(events: AlertEventInput[]) {
     const rows = events.filter((event) => event.category === "VESSEL");
     if (!rows.length) {

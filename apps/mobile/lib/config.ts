@@ -9,6 +9,8 @@ export const API_URLS = {
   equipmentLatest: `${API_BASE_URL}/api/equipment/latest`,
   equipmentConfig: `${API_BASE_URL}/api/equipment/config`,
   yt: `${API_BASE_URL}/api/yt/live`,
+  ytWorkTime: `${API_BASE_URL}/api/yt/work-time`,
+  ytWorkTimeStart: `${API_BASE_URL}/api/yt/work-time/start`,
   weather: `${API_BASE_URL}/api/weather/live`,
   gcLatest: `${API_BASE_URL}/api/gc/latest`,
   monitorsConfig: `${API_BASE_URL}/api/monitors/config`,

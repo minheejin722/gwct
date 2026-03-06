@@ -3,6 +3,7 @@ import {
   DeviceRegistrationSchema,
   type AlertEvent,
   type SourceId,
+  YTWorkShiftModeSchema,
 } from "@gwct/shared";
 import { z } from "zod";
 import { uid } from "../lib/id.js";
@@ -22,7 +23,14 @@ import { loadEquipmentLatestSnapshot } from "../services/equipment/latestStore.j
 import { buildGcCraneLiveRows } from "../services/gc/workState.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
+import {
+  getYtWorkSessionView,
+  isYtWorkShiftWindowError,
+  observeYtWorkSnapshot,
+  startYtWorkSession,
+} from "../services/ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services/yeosu/effectiveState.js";
+import { loadVesselEtaAdjustmentRecords } from "../services/vessels/etaAdjustmentStore.js";
 import { buildVesselLiveRows } from "../services/vessels/liveRows.js";
 
 interface RouteDeps {
@@ -94,6 +102,10 @@ const MonitorConfigInputSchema = z.object({
 
 const CleanupRunInputSchema = z.object({
   fullVacuum: z.boolean().optional(),
+});
+
+const StartYtWorkSessionInputSchema = z.object({
+  mode: YTWorkShiftModeSchema,
 });
 
 function toLegacyGcThresholdPayload(settings: Awaited<ReturnType<typeof loadMonitorSettings>>) {
@@ -184,9 +196,10 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/vessels/live", async () => {
-    const [rows, alerts] = await Promise.all([
+    const [rows, alerts, etaAdjustmentRecords] = await Promise.all([
       deps.repo.getLatestVesselItems("gwct_schedule_list"),
       deps.repo.getRecentAlerts(500),
+      loadVesselEtaAdjustmentRecords(),
     ]);
     const alertRows: AlertEvent[] = alerts.map((alert) => ({
       id: alert.id,
@@ -200,7 +213,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       payload: (alert.payload as Record<string, unknown>) || {},
       occurredAt: alert.occurredAt.toISOString(),
     }));
-    const items = buildVesselLiveRows(rows, alertRows);
+    const items = buildVesselLiveRows(rows, alertRows, etaAdjustmentRecords);
 
     return {
       source: "gwct_schedule_list",
@@ -299,6 +312,40 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       state: settings.equipmentMonitor.yt.state,
       enabled: settings.equipmentMonitor.yt.enabled,
     };
+  });
+
+  app.get("/api/yt/work-time", async () => {
+    const latest = await loadEquipmentLatestSnapshot();
+    if (latest) {
+      await observeYtWorkSnapshot(latest.ytUnits, latest.capturedAt);
+    }
+    return getYtWorkSessionView(new Date().toISOString(), latest?.capturedAt || null, Boolean(latest));
+  });
+
+  app.post("/api/yt/work-time/start", async (request, reply) => {
+    const parsed = StartYtWorkSessionInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const latest = await loadEquipmentLatestSnapshot();
+    if (!latest) {
+      return reply.code(409).send({ error: "Latest YT snapshot is not available yet." });
+    }
+
+    try {
+      const session = await startYtWorkSession(parsed.data.mode, new Date().toISOString(), latest.ytUnits);
+      return {
+        session,
+        latestYtCapturedAt: latest.capturedAt,
+        hasLiveSnapshot: true,
+      };
+    } catch (error) {
+      if (isYtWorkShiftWindowError(error)) {
+        return reply.code(400).send({ error: (error as Error).message });
+      }
+      throw error;
+    }
   });
 
   app.get("/api/weather/live", async () => {

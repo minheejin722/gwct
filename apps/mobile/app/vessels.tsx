@@ -32,6 +32,7 @@ interface VesselsResponse {
       direction: "earlier" | "later";
       crossedDate: boolean;
       humanMessage: string;
+      adjustmentCount: number;
     } | null;
   }>;
 }
