@@ -123,8 +123,42 @@ function compareYtNo(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-export function buildYtUnitSnapshotFromEquipment(items: EquipmentLoginStatus[]): YTUnitSnapshot[] {
+function mergePreviousMetadataForLoggedOut(
+  row: YTUnitSnapshot,
+  previousByYtNo: Map<string, YTUnitSnapshot>,
+  observedAt: string | null,
+): YTUnitSnapshot {
+  if (row.semanticState !== "logged_out") {
+    return {
+      ...row,
+      logoutTime: null,
+    };
+  }
+
+  const previous = previousByYtNo.get(row.ytNo);
+
+  const mergedBase: Omit<YTUnitSnapshot, "fingerprint"> = {
+    ...row,
+    driverName: row.driverName || previous?.driverName || null,
+    logoutTime:
+      previous?.semanticState === "logged_out"
+        ? previous.logoutTime || observedAt || null
+        : observedAt || previous?.logoutTime || null,
+  };
+
+  return {
+    ...mergedBase,
+    fingerprint: createFingerprint(mergedBase),
+  };
+}
+
+export function buildYtUnitSnapshotFromEquipment(
+  items: EquipmentLoginStatus[],
+  previousUnits: YTUnitSnapshot[] = [],
+  observedAt: string | null = null,
+): YTUnitSnapshot[] {
   const map = new Map<string, YTUnitSnapshot>();
+  const previousByYtNo = new Map(previousUnits.map((item) => [item.ytNo, item]));
 
   for (const item of items) {
     const ytNo = normalizeYtNo(item.equipmentId);
@@ -158,7 +192,9 @@ export function buildYtUnitSnapshotFromEquipment(items: EquipmentLoginStatus[]):
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => compareYtNo(a.ytNo, b.ytNo));
+  return Array.from(map.values())
+    .map((row) => mergePreviousMetadataForLoggedOut(row, previousByYtNo, observedAt))
+    .sort((a, b) => compareYtNo(a.ytNo, b.ytNo));
 }
 
 export function countLoggedInYtUnits(units: YTUnitSnapshot[]): number {

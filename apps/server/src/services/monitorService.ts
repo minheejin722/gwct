@@ -24,6 +24,7 @@ import {
   type ScheduleFocusSnapshot,
 } from "./scheduleFocus/latestStore.js";
 import {
+  loadEquipmentLatestSnapshot,
   saveEquipmentLatestSnapshot,
   summarizeEquipmentFocus,
   type EquipmentFocusSnapshot,
@@ -64,6 +65,7 @@ export class MonitorService {
     let fetchResult: Awaited<ReturnType<HtmlFetcher["fetch"]>> | null = null;
     let htmlHash: string | null = null;
     let rawSnapshotPersisted = false;
+    let previousEquipmentLatestSnapshot: EquipmentFocusSnapshot | null = null;
 
     try {
       fetchResult = await this.fetcher.fetch(sourceDef.source, sourceDef.url, {
@@ -117,10 +119,22 @@ export class MonitorService {
         await this.persistScheduleFocusSnapshot(bundle.vessels, seenAt, fetchResult.url);
       }
       if (sourceDef.source === "gwct_equipment_status") {
-        await this.persistEquipmentLatestSnapshot(bundle.equipment, seenAt, fetchResult.url);
+        previousEquipmentLatestSnapshot = await loadEquipmentLatestSnapshot();
+        await this.persistEquipmentLatestSnapshot(
+          bundle.equipment,
+          seenAt,
+          fetchResult.url,
+          previousEquipmentLatestSnapshot,
+        );
       }
 
-      const events = await this.persistAndBuildEvents(sourceDef.source, bundle, seenAt, fetchResult.url);
+      const events = await this.persistAndBuildEvents(
+        sourceDef.source,
+        bundle,
+        seenAt,
+        fetchResult.url,
+        previousEquipmentLatestSnapshot,
+      );
       await this.emitEvents(events, seenAt);
 
       await this.repo.finishScrapeRun(run.id, {
@@ -346,6 +360,7 @@ export class MonitorService {
     bundle: ReturnType<typeof parseBySource>,
     occurredAt: string,
     sourceUrl: string,
+    previousEquipmentLatestSnapshot: EquipmentFocusSnapshot | null = null,
   ): Promise<AlertEventInput[]> {
     const alerts: AlertEventInput[] = [];
     const monitorSettings = await loadMonitorSettings();
@@ -394,15 +409,26 @@ export class MonitorService {
         );
       }
       if (previousEquipmentRows.length && monitorSettings.equipmentMonitor.yt.enabled) {
+        const previousYtUnits =
+          previousEquipmentLatestSnapshot?.ytUnits || buildYtUnitSnapshotFromEquipment(previousEquipmentRows);
+        const currentYtUnits = buildYtUnitSnapshotFromEquipment(bundle.equipment, previousYtUnits, occurredAt);
         alerts.push(
-          ...detectYtUnitStatusEvents(previousEquipmentRows, bundle.equipment, source, occurredAt, { sourceUrl }),
+          ...detectYtUnitStatusEvents(previousEquipmentRows, bundle.equipment, source, occurredAt, {
+            sourceUrl,
+            prevUnits: previousYtUnits,
+            currUnits: currentYtUnits,
+          }),
         );
       }
     }
 
     if (source === "gwct_equipment_status") {
       const previousYtSnapshot = await this.repo.getLatestYtSnapshot(source);
-      const ytUnits = buildYtUnitSnapshotFromEquipment(bundle.equipment);
+      const ytUnits = buildYtUnitSnapshotFromEquipment(
+        bundle.equipment,
+        previousEquipmentLatestSnapshot?.ytUnits || [],
+        occurredAt,
+      );
       const ytLoggedInCount = countLoggedInYtUnits(ytUnits);
       const ytSnapshot =
         ytUnits.length > 0
@@ -613,6 +639,7 @@ export class MonitorService {
     equipment: ReturnType<typeof parseBySource>["equipment"],
     capturedAt: string,
     sourceUrl: string,
+    previousLatest: EquipmentFocusSnapshot | null = null,
   ): Promise<void> {
     const gcMap = new Map<number, EquipmentFocusSnapshot["gcStates"][number]>();
     for (const row of equipment) {
@@ -644,7 +671,7 @@ export class MonitorService {
       );
     }
 
-    const ytUnits = buildYtUnitSnapshotFromEquipment(equipment);
+    const ytUnits = buildYtUnitSnapshotFromEquipment(equipment, previousLatest?.ytUnits || [], capturedAt);
 
     const snapshot: EquipmentFocusSnapshot = {
       source: "gwct_equipment_status",

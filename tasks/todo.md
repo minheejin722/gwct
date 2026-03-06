@@ -1621,3 +1621,184 @@
   - The Monitoring helper sentence now reads without the extra punctuation.
 - Verification:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+## Work Ranking Precision Verification Plan (2026-03-07)
+- [ ] Inspect the YT work-time backend session view and the Work screen rendering to identify the exact ranking key.
+- [ ] Run a focused verification using existing tests or a direct check to confirm whether ranking uses millisecond precision even when the UI shows only minutes.
+- [ ] Record the verification result and report the exact behavior without changing code.
+## Work Ranking Precision Verification Review
+- Verification result:
+  - Yes. Work ranking is determined by the backend's millisecond-level accumulated duration, not by the minute-only label shown in the UI.
+- Evidence in backend:
+  - [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts)
+    - `buildDriverSummary(...)` computes `totalWorkedMs` first.
+    - `totalWorkedMinutes` and `totalWorkedLabel` are derived display fields.
+    - `materializeYtWorkSession(...)` sorts drivers by `right.totalWorkedMs - left.totalWorkedMs` before returning the list.
+  - [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx)
+    - The Work screen renders `session.drivers` as returned by the backend.
+    - It does not re-sort the list on the client.
+- Direct execution check:
+  - Ran a focused `tsx` check with two drivers whose displayed label is identical (`0시간 1분`) but whose accumulated work differs by 1000ms.
+  - Result:
+    - `AAA = 70500ms -> 0시간 1분`
+    - `BBB = 69500ms -> 0시간 1분`
+    - The returned order was `AAA`, then `BBB`.
+  - This proves the ranking can differ even when the visible minute label is the same.
+- Focused test:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+- Conclusion:
+  - Your understanding is correct.
+  - The displayed label is coarse (`분`), but the ranking is based on finer backend timing (`ms`), so a 1-second difference can separate 1등 and 2등.
+## Work Stop-Reason Count Plan (2026-03-07)
+- [x] Inspect the current YT work-time state/store, shared response schema, and Work UI to find the cleanest place to accumulate stop-reason keyword counters.
+- [x] Implement backend keyword-count accumulation for `오바`, `캐빈 셔틀`, and `본선작업`, expose it in the Work session response, and render the compact counts beside 운전 시작 in the Work UI.
+- [x] Add focused regression tests for repeated stop-reason counting, run relevant tests/typecheck, and document the review.
+
+## Work Stop-Reason Count Review
+- Root cause:
+  - Work 세션은 `latestStopReason`만 보여주고 있었고, 특정 작업 중단 패턴(`오바`, `캐빈 셔틀`, `본선작업`)이 몇 번째 누적인지는 별도 상태로 관리하지 않았습니다.
+- Implementation:
+  - Added shared response typing in [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts) so each Work driver can return `stopReasonCounters`.
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) to track three keyword buckets per driver:
+    - `오바` -> `오바하이`
+    - `캐빈 셔틀` -> `캐빈셔틀`
+    - `본선작업` -> `본선작업요청중단`
+  - The accumulator stores per-driver counters in the persisted Work session state and only increments when a newly observed inactive stop-reason signature appears, so the same stopped/logged_out snapshot does not re-count on every scrape.
+  - Updated [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) to render the compact `오바하이 1회`, `캐빈셔틀 1회`, `본선작업요청중단 1회` summary in the 운전 시작 block.
+- Focused verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) now verifies:
+    - repeated `오바` interruptions count as `2회` across separate inactive episodes
+    - repeated scrape of the same stopped reason does not double-count
+    - `캐빈 셔틀` and `본선작업` counters are independently accumulated and exposed in the Work session view
+## Work Time Adjustment Plan (2026-03-07)
+- [x] Inspect the current Work session counters and ranking path to identify where to add positive/negative time adjustments without breaking persisted sessions.
+- [x] Implement stop-reason adjustment rules (`오바하이` +35분, `화장실` -15분, keep other counters), apply them to Work ranking/labels, and expose/render the adjusted totals plus signed adjustment information in the Work UI.
+- [x] Add regression tests for repeated adjustment counts and rank ordering, run focused tests/typecheck, and document the review.
+
+## Work Time Adjustment Review
+- Root cause:
+  - Work 세션은 `오바하이`, `캐빈셔틀`, `본선작업요청중단` 카운트를 누적만 하고 있었고, 실제 순위 정렬과 누적 시간 표시는 원래의 `totalWorkedMs`만 기준으로 삼고 있었습니다.
+  - 그래서 `오바하이` 가산 시간과 `화장실` 차감 시간을 순위와 화면에 반영할 경로가 없었습니다.
+- Implementation:
+  - Added `restroom` to [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts) and extended the Work driver summary with `adjustedWorkedMs`, `adjustedWorkedMinutes`, `adjustedWorkedLabel`, `adjustmentDeltaMs`, `adjustmentDeltaMinutes`, and `adjustmentDeltaLabel`.
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so tracked stop-reason rules now carry signed minute adjustments:
+    - `오바하이` = `+35분`
+    - `화장실` = `-15분`
+    - `캐빈셔틀`, `본선작업요청중단` = `0분`
+  - The persisted Work session still accumulates raw worked time in milliseconds, then derives an adjusted total for ranking and UI display. Ranking now sorts by `adjustedWorkedMs`.
+  - Stop-reason counters still increment only when a new inactive episode is observed, so repeated scrape of the same stopped/logged_out snapshot does not over-count. This keeps `2회`, `3회` ... aligned with real repeated interruptions after relogin/restart.
+  - Updated [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) to show the signed adjustment value before the adjusted total, making `+` / `-` visible in the Work ranking cards.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) now verifies:
+    - `오바` repeated across separate inactive episodes accumulates correctly
+    - `화장실` is counted and subtracts `15분`
+    - rank ordering follows `adjustedWorkedMs`, not the raw worked time
+## YT Logged-Out Cabin Preserve Plan (2026-03-07)
+- [x] Inspect the YT live snapshot build path and YT Count screen to confirm why `logged_out` rows drop the last driver name.
+- [x] Implement a minimal latest-snapshot merge so `logged_out` YT rows keep the last known driver name in `Cabin` without disturbing raw diff semantics.
+- [x] Add regression coverage, run focused tests/typecheck, and document the review.
+
+## YT Logged-Out Cabin Preserve Review
+- Root cause:
+  - `YT Count` 화면은 [loadEquipmentLatestSnapshot](C:/coding/gwct/apps/server/src/services/equipment/latestStore.ts)로 저장된 latest snapshot의 `ytUnits`를 그대로 읽고 있었습니다.
+  - 그런데 latest snapshot 생성 시 [buildYtUnitSnapshotFromEquipment](C:/coding/gwct/apps/server/src/services/equipment/ytUnits.ts)가 현재 scrape의 raw row만 보고 `logged_out` 행의 `driverName`을 `null`로 저장하고 있었고, 이전에 누가 마지막으로 운전했는지는 carry-forward하지 않았습니다.
+- Implementation:
+  - Extended [buildYtUnitSnapshotFromEquipment](C:/coding/gwct/apps/server/src/services/equipment/ytUnits.ts) with an optional `previousUnits` input and a logged-out merge step.
+  - If the current YT row is `logged_out` and its current `driverName` is empty, the builder now copies the last known driver name from the previous snapshot for the same `YT 번호`.
+  - Updated [monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) so `persistEquipmentLatestSnapshot(...)` loads the previous latest snapshot and passes its `ytUnits` into the builder before saving the new latest snapshot.
+  - Raw diff/event semantics remain unchanged because diff detection still calls the builder without a previous snapshot, so this carry-forward applies only to the UI-facing latest snapshot.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/equipment-focus.test.ts tests/yt-monitor.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [equipment-focus.test.ts](C:/coding/gwct/apps/server/tests/equipment-focus.test.ts) now verifies that a current `logged_out` YT row with no driver name still exposes the previous driver's name as `Cabin` in the latest snapshot path.
+## YT Count Label + Logout Timestamp Plan (2026-03-07)
+- [x] Inspect the YT Count snapshot schema, API, and mobile UI to confirm where the active label and login/logout timestamp row are sourced from.
+- [x] Implement a minimal server/mobile change so active rows show `운전중`, and logged_out rows preserve/display `로그아웃: MM-DD HH:mm` until the same YT becomes active again.
+- [x] Add regression coverage, run focused tests/typecheck, and document the review.
+
+## YT Count Label + Logout Timestamp Review
+- Root cause:
+  - The `YT Count` screen in [yt.tsx](C:/coding/gwct/apps/mobile/app/yt.tsx) rendered the active badge as `운영`, and always used the third row as `로그인: ...` based on `unit.loginTime`.
+  - The server latest snapshot path did not store a dedicated logout timestamp, so a `logged_out` row had no stable time to show on the UI.
+- Implementation:
+  - Extended [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts) so `YTUnitSnapshot` can carry optional `logoutTime`.
+  - Updated [ytUnits.ts](C:/coding/gwct/apps/server/src/services/equipment/ytUnits.ts):
+    - `active` label semantics remain unchanged in the raw state machine.
+    - Added latest-snapshot-only merge logic so a `logged_out` YT row can retain the previous driver name and record the first logout timestamp (`capturedAt`) for that inactive run.
+    - Repeated `logged_out` scrapes keep the original `logoutTime` instead of overwriting it every poll.
+    - When the same YT becomes active again, `logoutTime` resets to `null`.
+  - Updated [monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) to pass `capturedAt` and previous latest `ytUnits` into the snapshot builder before persisting the new latest snapshot.
+  - Updated [yt.tsx](C:/coding/gwct/apps/mobile/app/yt.tsx):
+    - `active` badge text now renders as `운전중`
+    - Third row dynamically switches between `로그인: ...` and `로그아웃: ...`
+    - `logged_out` rows format the stored ISO logout timestamp as `MM-DD HH:mm`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/equipment-focus.test.ts tests/yt-monitor.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [equipment-focus.test.ts](C:/coding/gwct/apps/server/tests/equipment-focus.test.ts) now verifies:
+    - the first `logged_out` observation records `logoutTime`
+    - repeated `logged_out` scrapes preserve the original recorded time
+    - re-activation clears `logoutTime`
+## YT Relogin Message Correction Plan (2026-03-07)
+- [x] Inspect the current YT transition rules for `logged_out -> active`, same-YT driver changes, and any company-prefix handling.
+- [x] Implement minimal transition logic so `다시 로그인` applies only to the same YT+same driver, while different-driver returns become `로그인`, `교대`, or `주야 교대` based on the last known driver and two-letter company prefix.
+- [x] Add focused regression tests, run verification/typecheck, and document the review.
+
+## YT Relogin Message Correction Review
+- Root cause:
+  - [diff.ts](C:/coding/gwct/apps/server/src/engine/diff.ts) was treating every `logged_out -> active` transition as `다시 로그인`.
+  - That logic only looked at the YT state transition and YT number, not the last known driver identity, so day/night handoff and same-YT driver swaps were mislabeled as relogin.
+  - The existing `교대` detection only covered rows where both `before.driverName` and `after.driverName` were present in the same compare cycle. It did not recover the previous driver name across an intermediate `logged_out` row.
+- Implementation:
+  - Extended [domain.ts](C:/coding/gwct/packages/shared/src/schemas/domain.ts) with a new `shift_handoff` YT transition kind.
+  - Updated [monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) so YT unit alert detection receives the previous latest YT snapshot and the current merged YT snapshot, preserving the last known driver across `logged_out` rows for transition comparison.
+  - Updated [diff.ts](C:/coding/gwct/apps/server/src/engine/diff.ts) to classify `logged_out -> active` like this:
+    - same YT + same driver => `다시 로그인`
+    - same YT + different driver + same two-letter company prefix => `교대`
+    - same YT + different driver + different two-letter company prefix => `주야 교대`
+    - previous driver unavailable => plain `로그인`
+  - Direct same-YT driver swaps without an intermediate logout now also become `주야 교대` when the company prefix changes.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-monitor.test.ts tests/equipment-focus.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Added regression coverage:
+  - [yt-monitor.test.ts](C:/coding/gwct/apps/server/tests/yt-monitor.test.ts) now verifies:
+    - same-driver return after logout => `다시 로그인`
+    - different same-company driver after logout => `교대`
+    - different-company driver after logout => `주야 교대`
+    - missing previous driver identity => plain `로그인`
+    - direct same-YT different-company swap => `주야 교대`
+## Work Shift Window Correction Plan (2026-03-07)
+- [x] Inspect the current Work shift-window calculation and Shift Start helper text for the existing 07:00/19:00 boundaries.
+- [x] Update the server-side Work session window to `06:45~18:45` for day and `18:45~06:45` for night, and align the Work UI helper text with the same rule.
+- [x] Adjust focused regression tests, run verification/typecheck, and document the correction.
+
+## Work Shift Window Correction Review
+- Root cause:
+  - The Work session service still hardcoded `07:00~19:00` and `19:00~07:00` as the valid start windows.
+  - The Work screen helper copy in [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) showed the same outdated times.
+- Implementation:
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) to centralize the shift boundaries as constants:
+    - day: `06:45~18:45`
+    - night: `18:45~06:45`
+  - `buildShiftWindow(...)` now uses those new boundaries for:
+    - start validation
+    - shift window start time
+    - shift completion time
+    - error messages
+  - Updated the Work screen helper text in [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) to display the same new time windows under `Shift Start`.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+- Regression coverage updated:
+  - [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts)
+    - night shift completion now expects `06:45 KST` end (`2026-03-07T21:45:00.000Z`)
+    - worked duration changed from `390분` to `375분`
+    - validation errors now expect `06:45~18:45` and `18:45~06:45`

@@ -131,6 +131,7 @@ export const YTUnitSnapshotSchema = z.object({
   ytNo: z.string(),
   driverName: z.string().nullable(),
   loginTime: z.string().nullable(),
+  logoutTime: z.string().nullable().optional(),
   hkName: z.string().nullable(),
   stopReason: z.string().nullable(),
   semanticState: YTSemanticStateSchema,
@@ -145,6 +146,7 @@ export const YTUnitTransitionKindSchema = z.enum([
   "logged_out_to_active",
   "stopped_reason_changed",
   "driver_changed",
+  "shift_handoff",
 ]);
 export type YTUnitTransitionKind = z.infer<typeof YTUnitTransitionKindSchema>;
 
@@ -161,6 +163,21 @@ export const YTWorkSessionBreakSchema = z.object({
 });
 export type YTWorkSessionBreak = z.infer<typeof YTWorkSessionBreakSchema>;
 
+export const YTWorkStopReasonCounterKindSchema = z.enum([
+  "over_high",
+  "cabin_shuttle",
+  "ship_work_request_stop",
+  "restroom",
+]);
+export type YTWorkStopReasonCounterKind = z.infer<typeof YTWorkStopReasonCounterKindSchema>;
+
+export const YTWorkStopReasonCounterSchema = z.object({
+  kind: YTWorkStopReasonCounterKindSchema,
+  label: z.string(),
+  count: z.number().int().nonnegative(),
+});
+export type YTWorkStopReasonCounter = z.infer<typeof YTWorkStopReasonCounterSchema>;
+
 export const YTWorkDriverSummarySchema = z.object({
   driverKey: z.string(),
   driverName: z.string(),
@@ -169,6 +186,12 @@ export const YTWorkDriverSummarySchema = z.object({
   totalWorkedMs: z.number().int().nonnegative(),
   totalWorkedMinutes: z.number().int().nonnegative(),
   totalWorkedLabel: z.string(),
+  adjustedWorkedMs: z.number().int().nonnegative(),
+  adjustedWorkedMinutes: z.number().int().nonnegative(),
+  adjustedWorkedLabel: z.string(),
+  adjustmentDeltaMs: z.number().int(),
+  adjustmentDeltaMinutes: z.number().int(),
+  adjustmentDeltaLabel: z.string().nullable(),
   currentSegmentStartedAt: z.string().nullable(),
   latestState: YTSemanticStateSchema,
   latestStopReason: z.string().nullable(),
@@ -176,6 +199,7 @@ export const YTWorkDriverSummarySchema = z.object({
   lastSeenAt: z.string(),
   lastWorkedAt: z.string().nullable(),
   segments: z.number().int().nonnegative(),
+  stopReasonCounters: z.array(YTWorkStopReasonCounterSchema),
 });
 export type YTWorkDriverSummary = z.infer<typeof YTWorkDriverSummarySchema>;
 

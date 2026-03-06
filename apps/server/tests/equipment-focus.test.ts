@@ -3,6 +3,7 @@ import type { EquipmentLoginStatus, YTCountSnapshot } from "@gwct/shared";
 import { detectGcEquipmentFocusEvents, detectYtCountStateEvents } from "../src/engine/diff.js";
 import { parseGwctEquipmentStatus } from "../src/parsers/gwct.js";
 import type { EquipmentYtMonitorConfig } from "../src/services/monitorConfig/store.js";
+import { buildYtUnitSnapshotFromEquipment } from "../src/services/equipment/ytUnits.js";
 
 function equipmentRow(
   equipmentId: string,
@@ -125,6 +126,45 @@ describe("equipment focus parser and event rules", () => {
     expect(goLow.events).toHaveLength(1);
     expect(goLow.events[0]?.type).toBe("yt_count_low");
     expect(goLow.nextState).toBe("LOW");
+  });
+
+  it("preserves the last driver name in a logged_out YT snapshot for latest UI use", () => {
+    const previousUnits = buildYtUnitSnapshotFromEquipment([equipmentRow("YT23", "Hong", null, "03-01 20:15", null)]);
+    const currentUnits = buildYtUnitSnapshotFromEquipment(
+      [equipmentRow("YT23", null, null, null, "해치커버")],
+      previousUnits,
+      "2026-03-07T06:40:00.000Z",
+    );
+
+    expect(currentUnits).toHaveLength(1);
+    expect(currentUnits[0]?.ytNo).toBe("YT23");
+    expect(currentUnits[0]?.semanticState).toBe("logged_out");
+    expect(currentUnits[0]?.driverName).toBe("Hong");
+    expect(currentUnits[0]?.stopReason).toBe("해치커버");
+    expect(currentUnits[0]?.logoutTime).toBe("2026-03-07T06:40:00.000Z");
+  });
+
+  it("keeps the original logged_out timestamp across repeated logged_out scrapes until re-activation", () => {
+    const activeUnits = buildYtUnitSnapshotFromEquipment([equipmentRow("YT23", "Hong", null, "03-01 20:15", null)]);
+    const firstLoggedOut = buildYtUnitSnapshotFromEquipment(
+      [equipmentRow("YT23", null, null, null, "해치커버")],
+      activeUnits,
+      "2026-03-07T06:40:00.000Z",
+    );
+    const repeatedLoggedOut = buildYtUnitSnapshotFromEquipment(
+      [equipmentRow("YT23", null, null, null, "해치커버")],
+      firstLoggedOut,
+      "2026-03-07T06:50:00.000Z",
+    );
+    const backActive = buildYtUnitSnapshotFromEquipment(
+      [equipmentRow("YT23", "Hong", null, "03-01 21:00", null)],
+      repeatedLoggedOut,
+      "2026-03-07T07:00:00.000Z",
+    );
+
+    expect(repeatedLoggedOut[0]?.logoutTime).toBe("2026-03-07T06:40:00.000Z");
+    expect(backActive[0]?.semanticState).toBe("active");
+    expect(backActive[0]?.logoutTime).toBeNull();
   });
 
   it("emits GC180~190 focus events only for real changes", () => {

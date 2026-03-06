@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { YTUnitSnapshot, YTSemanticState } from "@gwct/shared";
 import {
   applyYtWorkSnapshot,
@@ -74,9 +74,9 @@ describe("YT work-time session rules", () => {
     const view = materializeYtWorkSession(session, "2026-03-07T22:05:00.000Z"); // 07:05 KST next day
 
     expect(view?.status).toBe("completed");
-    expect(view?.completedAt).toBe("2026-03-07T22:00:00.000Z");
-    expect(view?.drivers[0]?.totalWorkedMinutes).toBe(390);
-    expect(view?.drivers[0]?.totalWorkedLabel).toBe("6시간 30분");
+    expect(view?.completedAt).toBe("2026-03-07T21:45:00.000Z");
+    expect(view?.drivers[0]?.totalWorkedMinutes).toBe(375);
+    expect(view?.drivers[0]?.totalWorkedLabel).toBe("6시간 15분");
   });
 
   it("preserves the last stop reason when a stopped driver fully logs out", () => {
@@ -127,6 +127,83 @@ describe("YT work-time session rules", () => {
     expect(view?.drivers[0]?.totalWorkedMinutes).toBe(60);
   });
 
+  it("tracks repeated special stop-reason keywords across separate work interruptions", () => {
+    const observedAt = "2026-03-07T01:00:00.000Z"; // 10:00 KST
+    let session = startYtWorkSessionState("day", observedAt, [unit("YT23", "Hong", "active")]);
+
+    session = applyYtWorkSnapshot(session, [unit("YT23", "Hong", "stopped", "오바 중단")], "2026-03-07T01:10:00.000Z");
+    session = applyYtWorkSnapshot(session, [unit("YT23", "Hong", "stopped", "오바 중단")], "2026-03-07T01:11:00.000Z");
+    session = applyYtWorkSnapshot(session, [unit("YT23", "Hong", "active")], "2026-03-07T01:20:00.000Z");
+
+    session = applyYtWorkSnapshot(session, [unit("YT23", null, "logged_out", "오바 추가")], "2026-03-07T01:30:00.000Z");
+    session = applyYtWorkSnapshot(session, [unit("YT77", "Hong", "active")], "2026-03-07T01:40:00.000Z");
+
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT77", "Hong", "stopped", "캐빈 셔틀 이동")],
+      "2026-03-07T01:50:00.000Z",
+    );
+    session = applyYtWorkSnapshot(session, [unit("YT77", "Hong", "active")], "2026-03-07T02:00:00.000Z");
+
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT77", "Hong", "stopped", "본선작업 요청으로 중단")],
+      "2026-03-07T02:10:00.000Z",
+    );
+    session = applyYtWorkSnapshot(session, [unit("YT77", "Hong", "active")], "2026-03-07T02:20:00.000Z");
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT77", "Hong", "stopped", "화장실")],
+      "2026-03-07T02:30:00.000Z",
+    );
+
+    const view = materializeYtWorkSession(session, "2026-03-07T02:30:00.000Z");
+    const hong = view?.drivers.find((driver) => driver.driverName === "Hong");
+
+    expect(hong?.stopReasonCounters).toEqual([
+      { kind: "over_high", label: "오바하이", count: 2 },
+      { kind: "cabin_shuttle", label: "캐빈셔틀", count: 1 },
+      { kind: "ship_work_request_stop", label: "본선작업요청중단", count: 1 },
+      { kind: "restroom", label: "화장실", count: 1 },
+    ]);
+    expect(hong?.adjustmentDeltaMinutes).toBe(55);
+    expect(hong?.adjustmentDeltaLabel).toBe("+0시간 55분");
+  });
+
+  it("ranks drivers by adjusted worked time after plus and minus stop-reason rules", () => {
+    const observedAt = "2026-03-07T01:00:00.000Z"; // 10:00 KST
+    let session = startYtWorkSessionState("day", observedAt, [
+      unit("YT23", "Hong", "active"),
+      unit("YT24", "Kim", "active"),
+    ]);
+
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT23", "Hong", "stopped", "오바 작업"), unit("YT24", "Kim", "active")],
+      "2026-03-07T01:10:00.000Z",
+    );
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT23", "Hong", "active"), unit("YT24", "Kim", "stopped", "화장실")],
+      "2026-03-07T01:20:00.000Z",
+    );
+    session = applyYtWorkSnapshot(
+      session,
+      [unit("YT23", "Hong", "active"), unit("YT24", "Kim", "stopped", "화장실")],
+      "2026-03-07T01:30:00.000Z",
+    );
+
+    const view = materializeYtWorkSession(session, "2026-03-07T01:30:00.000Z");
+
+    expect(view?.drivers.map((driver) => driver.driverName)).toEqual(["Hong", "Kim"]);
+    expect(view?.drivers[0]?.totalWorkedMinutes).toBe(20);
+    expect(view?.drivers[0]?.adjustedWorkedMinutes).toBe(55);
+    expect(view?.drivers[0]?.adjustmentDeltaLabel).toBe("+0시간 35분");
+    expect(view?.drivers[1]?.totalWorkedMinutes).toBe(20);
+    expect(view?.drivers[1]?.adjustedWorkedMinutes).toBe(5);
+    expect(view?.drivers[1]?.adjustmentDeltaLabel).toBe("-0시간 15분");
+  });
+
   it("closes the previous driver and starts a new driver when the same YT is handed off", () => {
     const observedAt = "2026-03-07T01:00:00.000Z"; // 10:00 KST
     let session = startYtWorkSessionState("day", observedAt, [unit("YT23", "Hong", "active")]);
@@ -153,10 +230,11 @@ describe("YT work-time session rules", () => {
   it("rejects starting a shift outside the selected time window", () => {
     expect(() => {
       startYtWorkSessionState("day", "2026-03-07T12:00:00.000Z", [unit("YT23", "Hong", "active")]); // 21:00 KST
-    }).toThrow("주간근무 카운팅은 07:00~19:00 사이에만 시작할 수 있습니다.");
+    }).toThrow("주간근무 카운팅은 06:45~18:45 사이에만 시작할 수 있습니다.");
 
     expect(() => {
       startYtWorkSessionState("night", "2026-03-07T03:00:00.000Z", [unit("YT23", "Hong", "active")]); // 12:00 KST
-    }).toThrow("야간근무 카운팅은 19:00~07:00 사이에만 시작할 수 있습니다.");
+    }).toThrow("야간근무 카운팅은 18:45~06:45 사이에만 시작할 수 있습니다.");
   });
 });
+

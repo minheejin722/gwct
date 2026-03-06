@@ -912,6 +912,8 @@ export function detectYtCountStateEvents(
 
 interface YtUnitEventOptions {
   sourceUrl: string;
+  prevUnits?: YTUnitSnapshot[];
+  currUnits?: YTUnitSnapshot[];
 }
 
 function compareYtNo(a: string, b: string): number {
@@ -925,6 +927,19 @@ function compareYtNo(a: string, b: string): number {
 
 function normalizeStateReason(value: string | null | undefined): string | null {
   return normalizeOptionalValue(value);
+}
+
+function normalizeDriverIdentity(value: string | null | undefined): string | null {
+  return normalizeOptionalValue(value)?.replace(/\s+/g, " ") || null;
+}
+
+function extractDriverCompanyPrefix(value: string | null | undefined): string | null {
+  const normalized = normalizeDriverIdentity(value);
+  if (!normalized) {
+    return null;
+  }
+  const matched = normalized.match(/^([A-Za-z]{2})/);
+  return matched ? matched[1]!.toUpperCase() : null;
 }
 
 function createSyntheticLoggedOutSnapshot(previous: YTUnitSnapshot): YTUnitSnapshot {
@@ -954,7 +969,12 @@ function buildYtUnitAlert(
   const currentReason = normalizeStateReason(input.after.stopReason);
   const driverName = input.after.driverName || input.before.driverName || null;
   const loginTime = input.after.loginTime || input.before.loginTime || null;
-  const title = input.transitionKind === "driver_changed" ? `YT 기사 교대 (${input.after.ytNo})` : `YT 상태 변화 (${input.after.ytNo})`;
+  const title =
+    input.transitionKind === "shift_handoff"
+      ? `YT 주야 교대 (${input.after.ytNo})`
+      : input.transitionKind === "driver_changed"
+        ? `YT 기사 교대 (${input.after.ytNo})`
+        : `YT 상태 변화 (${input.after.ytNo})`;
 
   return createEvent({
     category: "YT",
@@ -999,8 +1019,8 @@ export function detectYtUnitStatusEvents(
   occurredAt: string,
   options: YtUnitEventOptions,
 ): AlertEventInput[] {
-  const prevUnits = buildYtUnitSnapshotFromEquipment(prev);
-  const currUnits = buildYtUnitSnapshotFromEquipment(curr);
+  const prevUnits = options.prevUnits || buildYtUnitSnapshotFromEquipment(prev);
+  const currUnits = options.currUnits || buildYtUnitSnapshotFromEquipment(curr);
   const prevMap = byKey(prevUnits, (item) => item.ytNo);
   const currMap = byKey(currUnits, (item) => item.ytNo);
   const ytNos = Array.from(new Set([...prevMap.keys(), ...currMap.keys()])).sort(compareYtNo);
@@ -1024,6 +1044,17 @@ export function detectYtUnitStatusEvents(
     const label = formatYtLabel(ytNo, after.driverName || before.driverName);
     const previousReason = normalizeStateReason(before.stopReason);
     const currentReason = normalizeStateReason(after.stopReason);
+    const sameDriver = normalizeDriverIdentity(before.driverName) === normalizeDriverIdentity(after.driverName);
+    const beforeCompanyPrefix = extractDriverCompanyPrefix(before.driverName);
+    const afterCompanyPrefix = extractDriverCompanyPrefix(after.driverName);
+    const isDifferentCompanyHandoff = Boolean(
+      before.driverName &&
+        after.driverName &&
+        before.driverName !== after.driverName &&
+        beforeCompanyPrefix &&
+        afterCompanyPrefix &&
+        beforeCompanyPrefix !== afterCompanyPrefix,
+    );
 
     if (before.semanticState === "active" && after.semanticState === "stopped") {
       transitionKind = "active_to_stopped";
@@ -1035,8 +1066,19 @@ export function detectYtUnitStatusEvents(
       transitionKind = "stopped_to_active";
       message = `${label} 중단 해제`;
     } else if (before.semanticState === "logged_out" && after.semanticState === "active") {
-      transitionKind = "logged_out_to_active";
-      message = `${label} 다시 로그인`;
+      if (sameDriver && before.driverName && after.driverName) {
+        transitionKind = "logged_out_to_active";
+        message = `${label} 다시 로그인`;
+      } else if (isDifferentCompanyHandoff) {
+        transitionKind = "shift_handoff";
+        message = `${ytNo} ${before.driverName} -> ${after.driverName} 주야 교대`;
+      } else if (before.driverName && after.driverName && before.driverName !== after.driverName) {
+        transitionKind = "driver_changed";
+        message = `${ytNo} ${before.driverName} -> ${after.driverName} 교대`;
+      } else {
+        transitionKind = "logged_out_to_active";
+        message = `${label} 로그인`;
+      }
     } else if (
       before.semanticState === "stopped" &&
       after.semanticState === "stopped" &&
@@ -1045,8 +1087,8 @@ export function detectYtUnitStatusEvents(
       transitionKind = "stopped_reason_changed";
       message = `${label} 중단 사유 변경: ${previousReason || "-"} -> ${currentReason || "-"}`;
     } else if (before.driverName && after.driverName && before.driverName !== after.driverName) {
-      transitionKind = "driver_changed";
-      message = `${ytNo} ${before.driverName} -> ${after.driverName} 교대`;
+      transitionKind = isDifferentCompanyHandoff ? "shift_handoff" : "driver_changed";
+      message = `${ytNo} ${before.driverName} -> ${after.driverName} ${isDifferentCompanyHandoff ? "주야 교대" : "교대"}`;
     }
 
     if (!transitionKind || !message) {

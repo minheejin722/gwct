@@ -127,7 +127,7 @@ export default function WorkTimeScreen() {
             )}
           </Pressable>
         </View>
-        <Text style={styles.helperText}>주간 07:00~19:00, 야간 19:00~07:00 안에서만 시작할 수 있습니다.</Text>
+        <Text style={styles.helperText}>주간 06:45~18:45, 야간 18:45~06:45 안에서만 시작할 수 있습니다.</Text>
       </View>
 
       {session ? (
@@ -166,6 +166,9 @@ export default function WorkTimeScreen() {
             const isInactive = driver.latestState === "stopped" || driver.latestState === "logged_out";
             const showReason = isInactive && Boolean(driver.latestStopReason);
             const showStoppedAt = isInactive;
+            const stopCounterSummary = driver.stopReasonCounters
+              .map((item) => `${item.label} ${item.count}회`)
+              .join("  ");
 
             return (
               <View key={driver.driverKey} style={styles.driverCard}>
@@ -176,7 +179,19 @@ export default function WorkTimeScreen() {
                       <Text style={styles.rankText}>{rankLabel(index, drivers.length)}</Text>
                     </View>
                   </View>
-                  <Text style={styles.workedLabel}>{driver.totalWorkedLabel}</Text>
+                  <View style={styles.workedValueRow}>
+                    {driver.adjustmentDeltaLabel ? (
+                      <Text
+                        style={[
+                          styles.adjustmentDeltaText,
+                          driver.adjustmentDeltaMinutes > 0 ? styles.adjustmentPlus : styles.adjustmentMinus,
+                        ]}
+                      >
+                        {driver.adjustmentDeltaLabel}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.workedLabel}>{driver.adjustedWorkedLabel}</Text>
+                  </View>
                 </View>
 
                 <View style={styles.summaryRow}>
@@ -192,7 +207,10 @@ export default function WorkTimeScreen() {
 
                 <View style={styles.timeStack}>
                   <View style={styles.timeBlock}>
-                    <Text style={styles.timeLabel}>운전 시작</Text>
+                    <View style={styles.timeHeaderRow}>
+                      <Text style={styles.timeLabel}>운전 시작</Text>
+                      {stopCounterSummary ? <Text style={styles.counterSummary}>{stopCounterSummary}</Text> : null}
+                    </View>
                     <Text style={styles.timeValue}>{formatDateTime(driver.firstSeenAt)}</Text>
                   </View>
                   {showStoppedAt ? (
@@ -308,12 +326,31 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
     driverNameRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: 8 },
     rankText: { fontSize: 18, fontWeight: "800", color: colors.secondaryText },
     driverName: { fontSize: 20, fontWeight: "800", color: colors.primaryText },
+    workedValueRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "flex-end",
+      flexWrap: "wrap",
+      gap: 8,
+      flexShrink: 1,
+    },
     workedLabel: {
       fontSize: 20,
       fontWeight: "800",
       color: colors.accent,
       textAlign: "right",
       flexShrink: 0,
+    },
+    adjustmentDeltaText: {
+      fontSize: 13,
+      fontWeight: "800",
+      textAlign: "right",
+    },
+    adjustmentPlus: {
+      color: colors.success,
+    },
+    adjustmentMinus: {
+      color: colors.danger,
     },
     summaryRow: {
       flexDirection: "row",
@@ -333,7 +370,20 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
       paddingVertical: 10,
       gap: 4,
     },
+    timeHeaderRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 10,
+    },
     timeLabel: { fontSize: 12, fontWeight: "700", color: colors.secondaryText },
+    counterSummary: {
+      flex: 1,
+      textAlign: "right",
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.accentMuted,
+    },
     timeValue: { fontSize: 15, fontWeight: "700", color: colors.primaryText },
   });
 }

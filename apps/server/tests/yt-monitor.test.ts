@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EquipmentLoginStatus } from "@gwct/shared";
 import { detectYtCountStateEvents, detectYtUnitStatusEvents } from "../src/engine/diff.js";
 import type { EquipmentYtMonitorConfig } from "../src/services/monitorConfig/store.js";
+import { buildYtUnitSnapshotFromEquipment } from "../src/services/equipment/ytUnits.js";
 
 function ytRow(
   equipmentId: string,
@@ -153,9 +154,119 @@ describe("YT monitor rules", () => {
     expect(backActive[0]?.payload.transitionKind).toBe("logged_out_to_active");
   });
 
+  it("uses 다시 로그인 only when the same YT and same driver return after logout", () => {
+    const active = [ytRow("YT17", "DYHong", "03-04 08:05", null)];
+    const loggedOut = [ytRow("YT17", null, null, null)];
+    const prevUnits = buildYtUnitSnapshotFromEquipment(active);
+    const loggedOutUnits = buildYtUnitSnapshotFromEquipment(loggedOut, prevUnits, "2026-03-04T04:20:00.000Z");
+    const backSameDriverUnits = buildYtUnitSnapshotFromEquipment(
+      [ytRow("YT17", "DYHong", "03-04 08:30", null)],
+      loggedOutUnits,
+      "2026-03-04T04:30:00.000Z",
+    );
+
+    const backSameDriver = detectYtUnitStatusEvents(
+      loggedOut,
+      [ytRow("YT17", "DYHong", "03-04 08:30", null)],
+      "gwct_equipment_status",
+      "2026-03-04T04:30:00.000Z",
+      {
+        sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+        prevUnits: loggedOutUnits,
+        currUnits: backSameDriverUnits,
+      },
+    );
+
+    expect(backSameDriver).toHaveLength(1);
+    expect(backSameDriver[0]?.payload.transitionKind).toBe("logged_out_to_active");
+    expect(backSameDriver[0]?.message).toBe("YT17 DYHong 다시 로그인");
+  });
+
+  it("treats a different same-company driver after logout as 교대, not 다시 로그인", () => {
+    const active = [ytRow("YT17", "DYHong", "03-04 08:05", null)];
+    const loggedOut = [ytRow("YT17", null, null, null)];
+    const prevUnits = buildYtUnitSnapshotFromEquipment(active);
+    const loggedOutUnits = buildYtUnitSnapshotFromEquipment(loggedOut, prevUnits, "2026-03-04T04:20:00.000Z");
+    const nextUnits = buildYtUnitSnapshotFromEquipment(
+      [ytRow("YT17", "DYKim", "03-04 08:30", null)],
+      loggedOutUnits,
+      "2026-03-04T04:30:00.000Z",
+    );
+
+    const changed = detectYtUnitStatusEvents(
+      loggedOut,
+      [ytRow("YT17", "DYKim", "03-04 08:30", null)],
+      "gwct_equipment_status",
+      "2026-03-04T04:30:00.000Z",
+      {
+        sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+        prevUnits: loggedOutUnits,
+        currUnits: nextUnits,
+      },
+    );
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.title).toBe("YT 기사 교대 (YT17)");
+    expect(changed[0]?.message).toBe("YT17 DYHong -> DYKim 교대");
+    expect(changed[0]?.payload.transitionKind).toBe("driver_changed");
+  });
+
+  it("treats a different-company driver after logout as 주야 교대", () => {
+    const active = [ytRow("YT17", "DYHong", "03-04 08:05", null)];
+    const loggedOut = [ytRow("YT17", null, null, null)];
+    const prevUnits = buildYtUnitSnapshotFromEquipment(active);
+    const loggedOutUnits = buildYtUnitSnapshotFromEquipment(loggedOut, prevUnits, "2026-03-04T04:20:00.000Z");
+    const nextUnits = buildYtUnitSnapshotFromEquipment(
+      [ytRow("YT17", "JJKim", "03-04 08:30", null)],
+      loggedOutUnits,
+      "2026-03-04T04:30:00.000Z",
+    );
+
+    const changed = detectYtUnitStatusEvents(
+      loggedOut,
+      [ytRow("YT17", "JJKim", "03-04 08:30", null)],
+      "gwct_equipment_status",
+      "2026-03-04T04:30:00.000Z",
+      {
+        sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+        prevUnits: loggedOutUnits,
+        currUnits: nextUnits,
+      },
+    );
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.title).toBe("YT 주야 교대 (YT17)");
+    expect(changed[0]?.message).toBe("YT17 DYHong -> JJKim 주야 교대");
+    expect(changed[0]?.payload.transitionKind).toBe("shift_handoff");
+  });
+
+  it("falls back to plain 로그인 when the previous driver identity is unavailable", () => {
+    const loggedOut = [ytRow("YT17", null, null, null)];
+    const nextUnits = buildYtUnitSnapshotFromEquipment(
+      [ytRow("YT17", "JJKim", "03-04 08:30", null)],
+      [],
+      "2026-03-04T04:30:00.000Z",
+    );
+
+    const changed = detectYtUnitStatusEvents(
+      loggedOut,
+      [ytRow("YT17", "JJKim", "03-04 08:30", null)],
+      "gwct_equipment_status",
+      "2026-03-04T04:30:00.000Z",
+      {
+        sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
+        currUnits: nextUnits,
+      },
+    );
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.message).toBe("YT17 JJKim 로그인");
+    expect(changed[0]?.payload.transitionKind).toBe("logged_out_to_active");
+  });
+
   it("emits a driver replacement event when the same YT stays logged in with a different driver", () => {
-    const before = [ytRow("YT23", "Hong", "03-04 08:00", null)];
-    const after = [ytRow("YT23", "Kim", "03-04 08:00", null)];
+    const before = [ytRow("YT23", "DYHong", "03-04 08:00", null)];
+    const after = [ytRow("YT23", "DYKim", "03-04 08:00", null)];
 
     const changed = detectYtUnitStatusEvents(
       before,
@@ -168,8 +279,26 @@ describe("YT monitor rules", () => {
     expect(changed).toHaveLength(1);
     expect(changed[0]?.type).toBe("yt_unit_status_changed");
     expect(changed[0]?.title).toBe("YT 기사 교대 (YT23)");
-    expect(changed[0]?.message).toBe("YT23 Hong -> Kim 교대");
+    expect(changed[0]?.message).toBe("YT23 DYHong -> DYKim 교대");
     expect(changed[0]?.payload.transitionKind).toBe("driver_changed");
+  });
+
+  it("emits 주야 교대 when the same YT changes to a driver with a different company prefix", () => {
+    const before = [ytRow("YT23", "DYHong", "03-04 08:00", null)];
+    const after = [ytRow("YT23", "JJKim", "03-04 08:00", null)];
+
+    const changed = detectYtUnitStatusEvents(
+      before,
+      after,
+      "gwct_equipment_status",
+      "2026-03-04T04:26:00.000Z",
+      { sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A" },
+    );
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.title).toBe("YT 주야 교대 (YT23)");
+    expect(changed[0]?.message).toBe("YT23 DYHong -> JJKim 주야 교대");
+    expect(changed[0]?.payload.transitionKind).toBe("shift_handoff");
   });
 
   it("treats first baseline and identical fingerprint as no-op", () => {

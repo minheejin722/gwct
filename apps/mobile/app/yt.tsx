@@ -41,12 +41,29 @@ function compareYtNo(a: string, b: string): number {
 
 function semanticLabel(state: SemanticState): string {
   if (state === "active") {
-    return "운영";
+    return "운전중";
   }
   if (state === "stopped") {
     return "중단";
   }
   return "로그아웃";
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatLoggedOutTime(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return `${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
 }
 
 export default function YtScreen() {
@@ -88,6 +105,8 @@ export default function YtScreen() {
       {sortedUnits.map((unit) => {
         const semantic = unit.semanticState;
         const showReason = Boolean(unit.stopReason);
+        const timeLabel = semantic === "logged_out" ? "로그아웃" : "로그인";
+        const timeValue = semantic === "logged_out" ? formatLoggedOutTime(unit.logoutTime) : unit.loginTime || "-";
         return (
           <View key={`${unit.ytNo}:${unit.fingerprint}`} style={styles.unitCard}>
             <View style={styles.unitHeader}>
@@ -117,7 +136,9 @@ export default function YtScreen() {
               </View>
             </View>
             <Text style={styles.row}>Cabin: {unit.driverName || "-"}</Text>
-            <Text style={styles.row}>로그인: {unit.loginTime || "-"}</Text>
+            <Text style={styles.row}>
+              {timeLabel}: {timeValue}
+            </Text>
             <Text style={[styles.row, showReason ? styles.reason : null]}>중단사유: {unit.stopReason || "-"}</Text>
           </View>
         );

@@ -1,6 +1,8 @@
 import type {
   YTUnitSnapshot,
   YTWorkDriverSummary,
+  YTWorkStopReasonCounter,
+  YTWorkStopReasonCounterKind,
   YTWorkSession,
   YTWorkSessionBreak,
   YTWorkSessionResponse,
@@ -12,6 +14,46 @@ import { loadYtWorkTimeRawState, saveYtWorkTimeRawState } from "./store.js";
 
 const KST_TIMEZONE = "Asia/Seoul";
 const KST_OFFSET = "+09:00";
+const DAY_SHIFT_START = { hour: 6, minute: 45 } as const;
+const DAY_SHIFT_END = { hour: 18, minute: 45 } as const;
+const NIGHT_SHIFT_START = DAY_SHIFT_END;
+const NIGHT_SHIFT_END = DAY_SHIFT_START;
+const DAY_SHIFT_WINDOW_LABEL = "06:45~18:45";
+const NIGHT_SHIFT_WINDOW_LABEL = "18:45~06:45";
+
+type TrackedStopReasonRule = {
+  kind: YTWorkStopReasonCounterKind;
+  label: string;
+  pattern: RegExp;
+  adjustmentMinutes: number;
+};
+
+const TRACKED_STOP_REASON_RULES: TrackedStopReasonRule[] = [
+  {
+    kind: "over_high",
+    label: "오바하이",
+    pattern: /오바/u,
+    adjustmentMinutes: 35,
+  },
+  {
+    kind: "cabin_shuttle",
+    label: "캐빈셔틀",
+    pattern: /캐빈\s*셔틀/u,
+    adjustmentMinutes: 0,
+  },
+  {
+    kind: "ship_work_request_stop",
+    label: "본선작업요청중단",
+    pattern: /본선\s*작업/u,
+    adjustmentMinutes: 0,
+  },
+  {
+    kind: "restroom",
+    label: "화장실",
+    pattern: /화장실/u,
+    adjustmentMinutes: -15,
+  },
+];
 
 interface StoredYtWorkDriver {
   driverKey: string;
@@ -26,6 +68,8 @@ interface StoredYtWorkDriver {
   lastSeenAt: string;
   lastWorkedAt: string | null;
   segments: number;
+  stopReasonCountMap: Record<YTWorkStopReasonCounterKind, number>;
+  lastCountedStopReasonKey: string | null;
 }
 
 interface StoredYtWorkSession {
@@ -107,6 +151,109 @@ function buildDriverKey(driverName: string): string {
   return driverName.replace(/\s+/g, " ").trim().toUpperCase();
 }
 
+function normalizeStopReason(value: string | null | undefined): string | null {
+  const normalized = (value || "").trim().replace(/\s+/g, " ");
+  return normalized.length ? normalized : null;
+}
+
+function createEmptyStopReasonCountMap(): Record<YTWorkStopReasonCounterKind, number> {
+  return {
+    over_high: 0,
+    cabin_shuttle: 0,
+    ship_work_request_stop: 0,
+    restroom: 0,
+  };
+}
+
+function matchTrackedStopReason(reason: string | null | undefined): TrackedStopReasonRule | null {
+  const normalized = normalizeStopReason(reason);
+  if (!normalized) {
+    return null;
+  }
+  return TRACKED_STOP_REASON_RULES.find((rule) => rule.pattern.test(normalized)) || null;
+}
+
+function buildTrackedStopReasonKey(
+  state: YTSemanticState,
+  reason: string | null | undefined,
+): string | null {
+  const matched = matchTrackedStopReason(reason);
+  const normalized = normalizeStopReason(reason);
+  if (!matched || !normalized || state === "active") {
+    return null;
+  }
+  return `${state}:${matched.kind}:${normalized}`;
+}
+
+function applyTrackedStopReasonCounter(
+  entry: StoredYtWorkDriver,
+  nextState: YTSemanticState,
+  stopReason: string | null | undefined,
+): StoredYtWorkDriver {
+  if (nextState === "active") {
+    return {
+      ...entry,
+      lastCountedStopReasonKey: null,
+    };
+  }
+
+  const matched = matchTrackedStopReason(stopReason);
+  const reasonKey = buildTrackedStopReasonKey(nextState, stopReason);
+  if (!matched || !reasonKey || entry.lastCountedStopReasonKey === reasonKey) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    stopReasonCountMap: {
+      ...entry.stopReasonCountMap,
+      [matched.kind]: (entry.stopReasonCountMap[matched.kind] || 0) + 1,
+    },
+    lastCountedStopReasonKey: reasonKey,
+  };
+}
+
+function materializeStopReasonCounters(
+  counts: Record<YTWorkStopReasonCounterKind, number>,
+): YTWorkStopReasonCounter[] {
+  return TRACKED_STOP_REASON_RULES.map((rule) => ({
+    kind: rule.kind,
+    label: rule.label,
+    count: counts[rule.kind] || 0,
+  })).filter((item) => item.count > 0);
+}
+
+function formatSignedDuration(totalMinutes: number): string | null {
+  if (!Number.isInteger(totalMinutes) || totalMinutes === 0) {
+    return null;
+  }
+  const sign = totalMinutes > 0 ? "+" : "-";
+  const absolute = Math.abs(totalMinutes);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+  return `${sign}${hours}시간 ${minutes}분`;
+}
+
+function calculateStopReasonAdjustmentMinutes(
+  counts: Record<YTWorkStopReasonCounterKind, number>,
+): number {
+  return TRACKED_STOP_REASON_RULES.reduce((total, rule) => {
+    return total + (counts[rule.kind] || 0) * rule.adjustmentMinutes;
+  }, 0);
+}
+
+function withDriverDefaults(entry: StoredYtWorkDriver): StoredYtWorkDriver {
+  return {
+    ...entry,
+    latestStopReason: normalizeStopReason(entry.latestStopReason),
+    stopReasonCountMap: {
+      ...createEmptyStopReasonCountMap(),
+      ...(entry.stopReasonCountMap || {}),
+    },
+    lastCountedStopReasonKey: entry.lastCountedStopReasonKey || null,
+  };
+}
+
 function formatWorkedDuration(totalWorkedMs: number): string {
   const totalMinutes = Math.max(0, Math.floor(totalWorkedMs / 60_000));
   const hours = Math.floor(totalMinutes / 60);
@@ -147,22 +294,28 @@ function effectiveWorkedMs(startAt: string, endAt: string, breaks: YTWorkSession
 
 function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
   const nowKst = toKstParts(now);
-  const today0700 = kstDate(nowKst.year, nowKst.month, nowKst.day, 7);
-  const today1900 = kstDate(nowKst.year, nowKst.month, nowKst.day, 19);
+  const todayDayStart = kstDate(nowKst.year, nowKst.month, nowKst.day, DAY_SHIFT_START.hour, DAY_SHIFT_START.minute);
+  const todayNightStart = kstDate(
+    nowKst.year,
+    nowKst.month,
+    nowKst.day,
+    NIGHT_SHIFT_START.hour,
+    NIGHT_SHIFT_START.minute,
+  );
   const today0000 = kstDate(nowKst.year, nowKst.month, nowKst.day, 0);
   const today0100 = kstDate(nowKst.year, nowKst.month, nowKst.day, 1);
   const today1200 = kstDate(nowKst.year, nowKst.month, nowKst.day, 12);
   const today1300 = kstDate(nowKst.year, nowKst.month, nowKst.day, 13);
 
   if (mode === "day") {
-    if (now < today0700 || now >= today1900) {
-      throw new ShiftWindowError("주간근무 카운팅은 07:00~19:00 사이에만 시작할 수 있습니다.");
+    if (now < todayDayStart || now >= todayNightStart) {
+      throw new ShiftWindowError(`주간근무 카운팅은 ${DAY_SHIFT_WINDOW_LABEL} 사이에만 시작할 수 있습니다.`);
     }
 
     return {
       mode,
-      shiftWindowStartedAt: today0700.toISOString(),
-      endsAt: today1900.toISOString(),
+      shiftWindowStartedAt: todayDayStart.toISOString(),
+      endsAt: todayNightStart.toISOString(),
       breaks: [
         {
           label: "점심 휴식",
@@ -173,13 +326,14 @@ function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
     };
   }
 
-  if (now >= today1900) {
-    const tomorrow = addDays(today1900, 1);
-    const tomorrow0700 = kstDate(
+  if (now >= todayNightStart) {
+    const tomorrow = addDays(todayNightStart, 1);
+    const tomorrowDayStart = kstDate(
       toKstParts(tomorrow).year,
       toKstParts(tomorrow).month,
       toKstParts(tomorrow).day,
-      7,
+      NIGHT_SHIFT_END.hour,
+      NIGHT_SHIFT_END.minute,
     );
     const nextMidnight = kstDate(
       toKstParts(tomorrow).year,
@@ -195,8 +349,8 @@ function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
     );
     return {
       mode,
-      shiftWindowStartedAt: today1900.toISOString(),
-      endsAt: tomorrow0700.toISOString(),
+      shiftWindowStartedAt: todayNightStart.toISOString(),
+      endsAt: tomorrowDayStart.toISOString(),
       breaks: [
         {
           label: "자정 휴식",
@@ -207,18 +361,19 @@ function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
     };
   }
 
-  if (now < today0700) {
-    const yesterday = addDays(today1900, -1);
-    const yesterday1900 = kstDate(
+  if (now < todayDayStart) {
+    const yesterday = addDays(todayNightStart, -1);
+    const yesterdayNightStart = kstDate(
       toKstParts(yesterday).year,
       toKstParts(yesterday).month,
       toKstParts(yesterday).day,
-      19,
+      NIGHT_SHIFT_START.hour,
+      NIGHT_SHIFT_START.minute,
     );
     return {
       mode,
-      shiftWindowStartedAt: yesterday1900.toISOString(),
-      endsAt: today0700.toISOString(),
+      shiftWindowStartedAt: yesterdayNightStart.toISOString(),
+      endsAt: todayDayStart.toISOString(),
       breaks: [
         {
           label: "자정 휴식",
@@ -229,7 +384,7 @@ function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
     };
   }
 
-  throw new ShiftWindowError("야간근무 카운팅은 19:00~07:00 사이에만 시작할 수 있습니다.");
+  throw new ShiftWindowError(`야간근무 카운팅은 ${NIGHT_SHIFT_WINDOW_LABEL} 사이에만 시작할 수 있습니다.`);
 }
 
 function seedDriverEntry(unit: YTUnitSnapshot, observedAt: string): StoredYtWorkDriver | null {
@@ -251,6 +406,8 @@ function seedDriverEntry(unit: YTUnitSnapshot, observedAt: string): StoredYtWork
     lastSeenAt: observedAt,
     lastWorkedAt: null,
     segments: 0,
+    stopReasonCountMap: createEmptyStopReasonCountMap(),
+    lastCountedStopReasonKey: null,
   };
 }
 
@@ -283,7 +440,7 @@ function finalizeIfExpired(session: StoredYtWorkSession, asOf: string): StoredYt
 
   const finalizedDrivers = Object.fromEntries(
     Object.entries(session.drivers).map(([key, entry]) => {
-      const closed = closeSegment(entry, session.endsAt, session.breaks);
+      const closed = closeSegment(withDriverDefaults(entry), session.endsAt, session.breaks);
       return [
         key,
         {
@@ -380,19 +537,21 @@ export function applyYtWorkSnapshot(
   const nextDrivers: Record<string, StoredYtWorkDriver> = {};
 
   for (const [driverKey, existing] of Object.entries(finalized.drivers)) {
+    const existingEntry = withDriverDefaults(existing);
     const latestNamed = namedUnits.get(driverKey) || null;
     const activeUnit = activeUnits.get(driverKey) || null;
-    const trackedYtNo = existing.activeYtNo || existing.latestYtNo;
+    const trackedYtNo = existingEntry.activeYtNo || existingEntry.latestYtNo;
     const latestByYtNoCandidate = trackedYtNo ? ytUnitsByNo.get(trackedYtNo) || null : null;
     const latestByYtNo =
       latestByYtNoCandidate && !normalizeDriverName(latestByYtNoCandidate.driverName) ? latestByYtNoCandidate : null;
     const latestObserved = latestNamed || latestByYtNo;
-    let nextEntry = { ...existing };
+    const normalizedObservedStopReason = normalizeStopReason(latestObserved?.stopReason);
+    let nextEntry = { ...existingEntry };
 
     if (nextEntry.currentSegmentStartedAt && !activeUnit) {
       nextEntry = closeSegment(nextEntry, cutoffAt, finalized.breaks);
       nextEntry.latestState = latestObserved?.semanticState || "logged_out";
-      nextEntry.latestStopReason = latestObserved?.stopReason || nextEntry.latestStopReason;
+      nextEntry.latestStopReason = normalizedObservedStopReason || nextEntry.latestStopReason;
       nextEntry.latestYtNo = latestObserved?.ytNo || nextEntry.latestYtNo;
     } else if (!nextEntry.currentSegmentStartedAt && activeUnit) {
       nextEntry.currentSegmentStartedAt = cutoffAt;
@@ -407,7 +566,7 @@ export function applyYtWorkSnapshot(
       nextEntry.latestStopReason = null;
     } else if (latestObserved) {
       nextEntry.latestState = latestObserved.semanticState;
-      nextEntry.latestStopReason = latestObserved.stopReason || nextEntry.latestStopReason;
+      nextEntry.latestStopReason = normalizedObservedStopReason || nextEntry.latestStopReason;
       nextEntry.latestYtNo = latestObserved.ytNo;
     } else {
       nextEntry.latestState = "logged_out";
@@ -417,6 +576,7 @@ export function applyYtWorkSnapshot(
 
     nextEntry.driverName = latestNamed?.driverName || nextEntry.driverName;
     nextEntry.lastSeenAt = observedAt;
+    nextEntry = applyTrackedStopReasonCounter(nextEntry, nextEntry.latestState, nextEntry.latestStopReason);
     nextDrivers[driverKey] = nextEntry;
   }
 
@@ -441,6 +601,8 @@ export function applyYtWorkSnapshot(
       lastSeenAt: observedAt,
       lastWorkedAt: null,
       segments: 0,
+      stopReasonCountMap: createEmptyStopReasonCountMap(),
+      lastCountedStopReasonKey: null,
     };
   }
 
@@ -456,28 +618,40 @@ function buildDriverSummary(
   asOf: string,
   breaks: YTWorkSessionBreak[],
 ): YTWorkDriverSummary {
+  const normalizedEntry = withDriverDefaults(entry);
   const liveWorkedMs =
-    entry.currentSegmentStartedAt
-      ? effectiveWorkedMs(entry.currentSegmentStartedAt, asOf, breaks)
+    normalizedEntry.currentSegmentStartedAt
+      ? effectiveWorkedMs(normalizedEntry.currentSegmentStartedAt, asOf, breaks)
       : 0;
-  const totalWorkedMs = entry.totalWorkedMs + liveWorkedMs;
+  const totalWorkedMs = normalizedEntry.totalWorkedMs + liveWorkedMs;
   const totalWorkedMinutes = Math.floor(totalWorkedMs / 60_000);
+  const adjustmentDeltaMinutes = calculateStopReasonAdjustmentMinutes(normalizedEntry.stopReasonCountMap);
+  const adjustmentDeltaMs = adjustmentDeltaMinutes * 60_000;
+  const adjustedWorkedMs = Math.max(0, totalWorkedMs + adjustmentDeltaMs);
+  const adjustedWorkedMinutes = Math.floor(adjustedWorkedMs / 60_000);
 
   return {
-    driverKey: entry.driverKey,
-    driverName: entry.driverName,
-    latestYtNo: entry.latestYtNo,
-    activeYtNo: entry.activeYtNo,
+    driverKey: normalizedEntry.driverKey,
+    driverName: normalizedEntry.driverName,
+    latestYtNo: normalizedEntry.latestYtNo,
+    activeYtNo: normalizedEntry.activeYtNo,
     totalWorkedMs,
     totalWorkedMinutes,
     totalWorkedLabel: formatWorkedDuration(totalWorkedMs),
-    currentSegmentStartedAt: entry.currentSegmentStartedAt,
-    latestState: entry.latestState,
-    latestStopReason: entry.latestStopReason,
-    firstSeenAt: entry.firstSeenAt,
-    lastSeenAt: entry.lastSeenAt,
-    lastWorkedAt: entry.lastWorkedAt,
-    segments: entry.segments,
+    adjustedWorkedMs,
+    adjustedWorkedMinutes,
+    adjustedWorkedLabel: formatWorkedDuration(adjustedWorkedMs),
+    adjustmentDeltaMs,
+    adjustmentDeltaMinutes,
+    adjustmentDeltaLabel: formatSignedDuration(adjustmentDeltaMinutes),
+    currentSegmentStartedAt: normalizedEntry.currentSegmentStartedAt,
+    latestState: normalizedEntry.latestState,
+    latestStopReason: normalizedEntry.latestStopReason,
+    firstSeenAt: normalizedEntry.firstSeenAt,
+    lastSeenAt: normalizedEntry.lastSeenAt,
+    lastWorkedAt: normalizedEntry.lastWorkedAt,
+    segments: normalizedEntry.segments,
+    stopReasonCounters: materializeStopReasonCounters(normalizedEntry.stopReasonCountMap),
   };
 }
 
@@ -496,8 +670,8 @@ export function materializeYtWorkSession(
   const drivers = Object.values(finalized.drivers)
     .map((entry) => buildDriverSummary(entry, cappedAsOf, finalized.breaks))
     .sort((left, right) => {
-      if (right.totalWorkedMs !== left.totalWorkedMs) {
-        return right.totalWorkedMs - left.totalWorkedMs;
+      if (right.adjustedWorkedMs !== left.adjustedWorkedMs) {
+        return right.adjustedWorkedMs - left.adjustedWorkedMs;
       }
       return left.driverName.localeCompare(right.driverName);
     });
