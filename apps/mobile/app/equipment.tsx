@@ -296,9 +296,10 @@ const styles = StyleSheet.create({
   },
   reasonGroup: {
     borderRadius: 7,
-    paddingLeft: 0,
-    paddingRight: 6,
+    paddingHorizontal: 6,
     paddingVertical: 2,
+    marginLeft: -6, // offset the padding so text aligns with the 'Under' column above
+    alignSelf: "flex-start",
   },
   reasonGroupStopped: {
     backgroundColor: "#fff0f0",

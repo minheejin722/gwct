@@ -33,3 +33,5 @@
 - For custom header nav buttons, avoid combining a filled circle with a contrasting border if the user wants a simple circular glyph; use a single outline or a single fill, not both.
 - If the user asks to roll back only the arrow glyph in a custom nav button, keep the container styling and revert just the glyph shape to the native-looking chevron instead of undoing the whole button change.
 - If the user says to return to the original state, revert the full visible behavior to the pre-change baseline instead of interpreting it as a partial style tweak.
+- For oversized summary cards on the home screen, scale the headline label and numeric value to match the available whitespace before changing layout structure; operators usually want stronger visual hierarchy, not a new card design.
+- If the user immediately cancels a just-made visual tweak, revert that exact tweak completely instead of iterating further on the same direction.

@@ -874,3 +874,29 @@
   - Restored the original Expo stack header back behavior, so the top-level screens are back to the default `< (tabs)` control.
 - Validation:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Home YT Widget Typography Plan (2026-03-06)
+- [x] Inspect the home screen YT summary card implementation and record the requested typography adjustment in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Increase the `YT` label and count typography so the card uses its available whitespace more effectively without changing the card layout or summary logic.
+- [x] Run mobile typecheck and record the review.
+
+## Home YT Widget Typography Review
+- Root cause:
+  - The home YT summary card had a relatively large fixed footprint, but the `YT` label and count stayed undersized, leaving too much empty space and weakening the visual hierarchy.
+- Fix:
+  - Increased the `YT` label typography and the numeric count size in the home card.
+  - Slightly rebalanced the card padding so the larger text uses the card space cleanly without changing the surrounding layout.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## Home YT Widget Rollback Plan (2026-03-06)
+- [x] Revert only the last home YT typography tweak in `apps/mobile/app/(tabs)/index.tsx` back to its previous values.
+- [x] Record the rollback request in `tasks/todo.md` and `tasks/lessons.md`.
+- [x] Run mobile typecheck and record the rollback review.
+
+## Home YT Widget Rollback Review
+- Fix:
+  - Restored the home `YT` card padding and typography to the pre-change values.
+  - No other home cards or summary logic were changed.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅

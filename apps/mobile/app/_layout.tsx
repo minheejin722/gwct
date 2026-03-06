@@ -1,7 +1,9 @@
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import { useEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
+import { Platform, Pressable } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { Ionicons } from "@expo/vector-icons";
 import EventSource from "react-native-sse";
 import { API_URLS } from "../lib/config";
 import { getExpoPushTokenSafe, localDeviceId } from "../lib/push";
@@ -107,24 +109,56 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: "#0f3b63" },
-        headerTintColor: "#ffffff",
-        contentStyle: { backgroundColor: "#eef4fb" },
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="vessels" options={{ title: "Vessel Schedule" }} />
-      <Stack.Screen name="cranes" options={{ title: "Crane Status" }} />
-      <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under 현황" }} />
-      <Stack.Screen name="yt" options={{ title: "YT Count" }} />
-      <Stack.Screen name="weather" options={{ title: "Pilotage/Weather" }} />
-      <Stack.Screen name="monitor" options={{ title: "Monitoring" }} />
-      <Stack.Screen name="monitor-gwct-eta" options={{ title: "GWCT ETA Monitor" }} />
-      <Stack.Screen name="monitor-gc-remaining" options={{ title: "GC Remaining" }} />
-      <Stack.Screen name="monitor-equipment" options={{ title: "Equipment Monitor" }} />
-      <Stack.Screen name="monitor-yeosu" options={{ title: "Yeosu Pilotage" }} />
-    </Stack>
+    <>
+      <StatusBar style="dark" />
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: "#f2f4f6" },
+          headerShadowVisible: false,
+          headerTintColor: "#000000",
+          headerTitleAlign: "center",
+          headerTitleStyle: { fontWeight: "bold", fontSize: 18 },
+          contentStyle: { backgroundColor: "#f2f4f6" },
+          headerLeft: ({ canGoBack }) => {
+            if (canGoBack) {
+              return (
+                <Pressable
+                  onPress={() => router.back()}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: "#ffffff",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginLeft: Platform.OS === "ios" ? 0 : 8,
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.05,
+                    shadowRadius: 3,
+                    elevation: 1,
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={20} color="#000" style={{ marginLeft: -2 }} />
+                </Pressable>
+              );
+            }
+            return null;
+          },
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="vessels" options={{ title: "Vessel Schedule" }} />
+        <Stack.Screen name="cranes" options={{ title: "Crane Status" }} />
+        <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under 현황" }} />
+        <Stack.Screen name="yt" options={{ title: "YT Count" }} />
+        <Stack.Screen name="weather" options={{ title: "Pilotage/Weather" }} />
+        <Stack.Screen name="monitor" options={{ title: "Monitoring" }} />
+        <Stack.Screen name="monitor-gwct-eta" options={{ title: "GWCT ETA Monitor" }} />
+        <Stack.Screen name="monitor-gc-remaining" options={{ title: "GC Remaining" }} />
+        <Stack.Screen name="monitor-equipment" options={{ title: "Equipment Monitor" }} />
+        <Stack.Screen name="monitor-yeosu" options={{ title: "Yeosu Pilotage" }} />
+      </Stack>
+    </>
   );
 }
