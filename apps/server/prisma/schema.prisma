@@ -224,6 +224,8 @@ model DeviceRegistration {
   timezone       String
   appVersion     String?
   alertsEnabled  Boolean  @default(true)
+  bannerEnabled  Boolean  @default(true)
+  themeMode      String   @default("system")
   categoryPrefs  Json
   quietHoursFrom String?
   quietHoursTo   String?

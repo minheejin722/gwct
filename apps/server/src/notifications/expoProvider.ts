@@ -16,18 +16,33 @@ export class ExpoPushProvider implements NotificationProvider {
       };
     }
 
-    const messages = request.recipients.map((recipient) => ({
-      to: recipient.token,
-      title: request.title,
-      body: request.body,
-      data: request.data,
-      sound: resolveAlertSoundPath({
-        platform: recipient.platform,
-        preferCustomIosSound: env.iosCustomAlertSound,
-        customSoundAvailable: env.iosCustomAlertSound,
-      }),
-      priority: "high",
-    }));
+    const messages = request.recipients.map((recipient) => {
+      if (!recipient.bannerEnabled) {
+        return {
+          to: recipient.token,
+          data: request.data,
+          priority: "high",
+          ...(recipient.platform === "ios"
+            ? {
+                _contentAvailable: true,
+              }
+            : {}),
+        };
+      }
+
+      return {
+        to: recipient.token,
+        title: request.title,
+        body: request.body,
+        data: request.data,
+        sound: resolveAlertSoundPath({
+          platform: recipient.platform,
+          preferCustomIosSound: env.iosCustomAlertSound,
+          customSoundAvailable: env.iosCustomAlertSound,
+        }),
+        priority: "high",
+      };
+    });
 
     const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",

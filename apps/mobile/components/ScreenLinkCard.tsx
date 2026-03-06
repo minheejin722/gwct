@@ -1,5 +1,6 @@
-﻿import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
 import { Link } from "expo-router";
+import { useAppPreferences } from "../lib/appPreferences";
 
 interface ScreenLinkCardProps {
   href: string;
@@ -8,11 +9,21 @@ interface ScreenLinkCardProps {
 }
 
 export function ScreenLinkCard({ href, title, subtitle }: ScreenLinkCardProps) {
+  const { colors } = useAppPreferences();
+
   return (
     <Link href={href as never} asChild>
-      <Pressable style={styles.card}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+      <Pressable
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.elevatedBackground,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <Text style={[styles.title, { color: colors.primaryText }]}>{title}</Text>
+        <Text style={[styles.subtitle, { color: colors.secondaryText }]}>{subtitle}</Text>
       </Pressable>
     </Link>
   );
@@ -20,9 +31,7 @@ export function ScreenLinkCard({ href, title, subtitle }: ScreenLinkCardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#f4f9ff",
     borderWidth: 1,
-    borderColor: "#c7dbef",
     borderRadius: 14,
     padding: 14,
     gap: 6,
@@ -30,10 +39,8 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#14304f",
   },
   subtitle: {
     fontSize: 13,
-    color: "#355c7f",
   },
 });

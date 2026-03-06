@@ -230,6 +230,9 @@ export const WeatherAlertEventSchema = z.object({
 });
 export type WeatherAlertEvent = z.infer<typeof WeatherAlertEventSchema>;
 
+export const ThemeModeSchema = z.enum(["system", "dark", "light"]);
+export type ThemeMode = z.infer<typeof ThemeModeSchema>;
+
 export const DeviceRegistrationSchema = z.object({
   deviceId: z.string(),
   platform: z.enum(["ios", "android", "web"]),
@@ -237,6 +240,8 @@ export const DeviceRegistrationSchema = z.object({
   timezone: z.string(),
   appVersion: z.string().nullable(),
   alertsEnabled: z.boolean().default(true),
+  bannerEnabled: z.boolean().default(true),
+  themeMode: ThemeModeSchema.default("system"),
 });
 export type DeviceRegistration = z.infer<typeof DeviceRegistrationSchema>;
 

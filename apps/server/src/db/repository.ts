@@ -867,22 +867,32 @@ export class Repository {
   }
 
   async registerDevice(input: DeviceRegistration) {
-    return prisma.deviceRegistration.upsert({
+    const existing = await prisma.deviceRegistration.findUnique({
       where: { deviceId: input.deviceId },
-      update: {
-        platform: input.platform,
-        expoPushToken: input.expoPushToken,
-        timezone: input.timezone,
-        appVersion: input.appVersion,
-        alertsEnabled: input.alertsEnabled,
-      },
-      create: {
+    });
+
+    if (existing) {
+      return prisma.deviceRegistration.update({
+        where: { deviceId: input.deviceId },
+        data: {
+          platform: input.platform,
+          expoPushToken: input.expoPushToken,
+          timezone: input.timezone,
+          appVersion: input.appVersion,
+        },
+      });
+    }
+
+    return prisma.deviceRegistration.create({
+      data: {
         deviceId: input.deviceId,
         platform: input.platform,
         expoPushToken: input.expoPushToken,
         timezone: input.timezone,
         appVersion: input.appVersion,
         alertsEnabled: input.alertsEnabled,
+        bannerEnabled: input.bannerEnabled,
+        themeMode: input.themeMode,
         categoryPrefs: {
           VESSEL: true,
           CRANE: true,
@@ -898,6 +908,8 @@ export class Repository {
     deviceId: string,
     settings: {
       alertsEnabled?: boolean;
+      bannerEnabled?: boolean;
+      themeMode?: "system" | "dark" | "light";
       quietHoursFrom?: string | null;
       quietHoursTo?: string | null;
       categoryPrefs?: Record<string, boolean>;
@@ -907,6 +919,8 @@ export class Repository {
       where: { deviceId },
       data: {
         alertsEnabled: settings.alertsEnabled,
+        bannerEnabled: settings.bannerEnabled,
+        themeMode: settings.themeMode,
         quietHoursFrom: settings.quietHoursFrom,
         quietHoursTo: settings.quietHoursTo,
         categoryPrefs: settings.categoryPrefs,

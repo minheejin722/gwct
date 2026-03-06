@@ -24,6 +24,7 @@ export class NotificationService {
       .map((device) => ({
         token: device.expoPushToken!,
         platform: normalizePlatform(device.platform),
+        bannerEnabled: device.bannerEnabled !== false,
       }));
 
     const deepLink = EVENT_TO_DEEPLINK[event.type] || "alerts";

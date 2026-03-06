@@ -3,6 +3,7 @@
 export interface NotificationRecipient {
   token: string;
   platform: "ios" | "android" | "web";
+  bannerEnabled: boolean;
 }
 
 export interface NotificationRequest {

@@ -900,3 +900,72 @@
   - No other home cards or summary logic were changed.
 - Validation:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+
+## iOS Status Bar Color Lock Plan (2026-03-06)
+- [x] Inspect the mobile root layout, modal screen, and Expo app config to identify why iOS status bar content flips to white in system dark mode.
+- [x] Force the app to stay on light interface style and keep all app-owned status bars on dark content so the top iPhone time/signal/battery glyphs remain black.
+- [x] Run mobile typecheck and record the review.
+
+## iOS Status Bar Color Lock Review
+- Root cause:
+  - `apps/mobile/app.json` used `userInterfaceStyle: "automatic"`, so iOS still treated the app as dark-mode eligible and could render the status bar glyphs in white when the system theme was dark.
+  - The modal screen also explicitly requested a light status bar on iOS, which conflicted with the desired always-black status bar rule.
+- Fix:
+  - Changed Expo app config to `userInterfaceStyle: "light"` so the app always presents itself as a light-interface app.
+  - Standardized the modal screen status bar to `dark` so app-owned screens no longer opt into white status bar content.
+- Validation:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npx expo config --type public --json` -> `"userInterfaceStyle":"light"` ✅
+
+## Mobile Settings Tab Rework Plan (2026-03-06)
+- [x] Inspect the current bottom-tab settings screen plus the existing device registration, notification, and theme-related code paths in `apps/mobile`, `apps/server`, and `packages/shared`.
+- [x] Add persisted device-level settings support for `alertsEnabled`, `bannerEnabled`, and `themeMode` without resetting saved values on app startup.
+- [x] Replace the duplicate monitor-status settings tab with a real settings screen for alarm on/off, banner on/off, and theme mode (`system`, `dark`, `light`) wired to live app behavior.
+- [x] Apply the new theme preference to the mobile shell and primary home/settings surfaces so the mode switch has visible effect.
+- [x] Run the relevant verification (`server` tests for device settings persistence + mobile typecheck) and record the review.
+
+## Mobile Settings Tab Rework Review
+- Root cause:
+  - The bottom-right settings tab only duplicated monitor status/navigation and did not control any real app-level behavior.
+  - Device alert preferences were not durable because app startup registration overwrote `alertsEnabled` back to `true`.
+- Fix:
+  - Added persisted device settings fields for `alertsEnabled`, `bannerEnabled`, and `themeMode` in shared/server types and the device registration storage path.
+  - Changed device registration so existing saved preferences survive app startup re-registration.
+  - Replaced the old settings tab with a real settings screen for:
+    - alarm on/off
+    - foreground banner on/off
+    - theme mode (`system`, `dark`, `light`)
+  - Added a mobile app preferences provider that:
+    - syncs device settings with the server
+    - drives local notification presentation rules
+    - applies the selected theme to the app shell and primary home/settings surfaces
+- Validation:
+  - `npm.cmd --workspace @gwct/server run prisma:push` ✅
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/device-settings-api.test.ts` ✅
+  - `npm.cmd --workspace @gwct/server run typecheck` ✅
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - `npm.cmd run typecheck` ✅
+- Follow-up note:
+  - `npm.cmd --workspace @gwct/server run prisma:generate` hit a Windows `EPERM` rename lock on `node_modules/.prisma/client/query_engine-windows.dll.node`. The schema push succeeded and TypeScript verification passed, but the Prisma engine binary refresh should be re-run after closing the process that currently holds that DLL.
+
+## Background Banner Suppression Follow-up (2026-03-06)
+- [x] Inspect the server push dispatch path and Expo notification constraints for background presentation behavior.
+- [x] Route `bannerEnabled=false` devices to a headless background push payload instead of a normal notification message.
+- [x] Enable iOS background remote notification entitlement in Expo config.
+- [x] Add server tests for normal-vs-headless Expo payload generation and rerun verification.
+
+## Background Banner Suppression Review
+- Root cause:
+  - The earlier `Banner` toggle only affected the in-app foreground notification handler. Server push dispatch still sent normal notification messages with `title/body`, so iOS/Android would keep showing OS banners while the app was backgrounded or terminated.
+- Fix:
+  - Added `bannerEnabled` to the push recipient model and passed it from the device registration rows into the notification provider.
+  - Changed the Expo push provider so:
+    - `bannerEnabled=true` keeps sending the existing normal push payload with `title`, `body`, and `sound`.
+    - `bannerEnabled=false` sends a headless background payload with only `data` and, on iOS, `_contentAvailable: true`.
+  - Enabled `enableBackgroundRemoteNotifications` in [app.json](C:/coding/gwct/apps/mobile/app.json) so iOS builds include the required `remote-notification` background mode for headless remote notifications.
+- Validation:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/device-settings-api.test.ts tests/expo-provider.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+  - `npx expo config --type public --json` includes `["expo-notifications",{"enableBackgroundRemoteNotifications":true}]` ✅
+- Constraint:
+  - Expo headless background notifications intentionally omit presentational fields. That means `Banner off` now suppresses background/terminated OS banners consistently, but those headless pushes also do not carry sound or other visible presentation by default.

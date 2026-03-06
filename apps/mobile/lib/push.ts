@@ -3,6 +3,10 @@ import * as Device from "expo-device";
 
 const EVENT_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 const seenAlertEvents = new Map<string, number>();
+const presentationPrefs = {
+  alertsEnabled: true,
+  bannerEnabled: true,
+};
 
 function pruneSeenAlertEvents(now: number): void {
   for (const [eventId, seenAt] of seenAlertEvents.entries()) {
@@ -41,6 +45,14 @@ export function rememberAlertEvent(eventId: string): boolean {
   return true;
 }
 
+export function configureNotificationPresentation(input: {
+  alertsEnabled: boolean;
+  bannerEnabled: boolean;
+}): void {
+  presentationPrefs.alertsEnabled = input.alertsEnabled;
+  presentationPrefs.bannerEnabled = input.bannerEnabled;
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const eventId = extractEventId(notification.request.content.data);
@@ -54,11 +66,21 @@ Notifications.setNotificationHandler({
       };
     }
 
+    if (!presentationPrefs.alertsEnabled) {
+      return {
+        shouldShowAlert: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+        shouldShowBanner: false,
+        shouldShowList: false,
+      };
+    }
+
     return {
-      shouldShowAlert: true,
+      shouldShowAlert: presentationPrefs.bannerEnabled,
       shouldPlaySound: true,
       shouldSetBadge: false,
-      shouldShowBanner: true,
+      shouldShowBanner: presentationPrefs.bannerEnabled,
       shouldShowList: true,
     };
   },

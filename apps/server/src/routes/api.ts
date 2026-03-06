@@ -583,6 +583,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       deviceId: saved.deviceId,
       platform: saved.platform,
       alertsEnabled: saved.alertsEnabled,
+      bannerEnabled: saved.bannerEnabled,
+      themeMode: saved.themeMode,
     };
   });
 
@@ -590,6 +592,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const params = request.params as { deviceId: string };
     const body = request.body as {
       alertsEnabled?: boolean;
+      bannerEnabled?: boolean;
+      themeMode?: "system" | "dark" | "light";
       quietHoursFrom?: string | null;
       quietHoursTo?: string | null;
       categoryPrefs?: Record<string, boolean>;
@@ -600,6 +604,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     try {
       const result = await deps.repo.updateDeviceSettings(params.deviceId, {
         alertsEnabled: body.alertsEnabled,
+        bannerEnabled: body.bannerEnabled,
+        themeMode: body.themeMode,
         quietHoursFrom: body.quietHoursFrom,
         quietHoursTo: body.quietHoursTo,
         categoryPrefs: body.categoryPrefs,
@@ -621,6 +627,9 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       return {
         id: result.id,
         deviceId: result.deviceId,
+        alertsEnabled: result.alertsEnabled,
+        bannerEnabled: result.bannerEnabled,
+        themeMode: result.themeMode,
         updatedAt: result.updatedAt,
       };
     } catch (error) {

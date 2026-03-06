@@ -5,8 +5,8 @@ import { Platform, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import EventSource from "react-native-sse";
+import { AppPreferencesProvider, useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
-import { getExpoPushTokenSafe, localDeviceId } from "../lib/push";
 import { resolveNotificationSound } from "../lib/notificationSound";
 
 interface LiveAlertMessage {
@@ -17,48 +17,27 @@ interface LiveAlertMessage {
 
 const localSseAlertsEnabled = process.env.EXPO_PUBLIC_LOCAL_SSE_ALERTS !== "false";
 
-export default function RootLayout() {
+function AppShell() {
+  const { alertsEnabled, colors } = useAppPreferences();
   const lastSeenEventIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const registerDevice = async () => {
-      const expoPushToken = await getExpoPushTokenSafe();
-      const payload = {
-        deviceId: localDeviceId(),
-        platform: Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : "web",
-        expoPushToken,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul",
-        appVersion: null,
-        alertsEnabled: true,
-      };
-
-      try {
-        await fetch(API_URLS.registerDevice, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // Keep app working even when server is temporarily unreachable.
-      }
-    };
-
-    void registerDevice();
-
     const receivedSub = Notifications.addNotificationReceivedListener(() => {
       // Foreground notification side effects can be added here.
     });
 
     let es: EventSource | null = null;
     const onAlert = (event: { data?: string }) => {
-      if (!event.data) {
+      if (!event.data || !alertsEnabled) {
         return;
       }
+
       try {
         const parsed = JSON.parse(event.data) as LiveAlertMessage;
         if (!parsed.eventId || parsed.eventId === lastSeenEventIdRef.current) {
           return;
         }
+
         lastSeenEventIdRef.current = parsed.eventId;
         const preferredSound = resolveNotificationSound();
         const schedule = async () => {
@@ -88,6 +67,7 @@ export default function RootLayout() {
             });
           }
         };
+
         void schedule();
       } catch {
         // Ignore malformed payloads during hot-reload or server restart.
@@ -106,19 +86,19 @@ export default function RootLayout() {
         es.close();
       }
     };
-  }, []);
+  }, [alertsEnabled]);
 
   return (
     <>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: "#f2f4f6" },
+          headerStyle: { backgroundColor: colors.headerBackground },
           headerShadowVisible: false,
-          headerTintColor: "#000000",
+          headerTintColor: colors.primaryText,
           headerTitleAlign: "center",
           headerTitleStyle: { fontWeight: "bold", fontSize: 18 },
-          contentStyle: { backgroundColor: "#f2f4f6" },
+          contentStyle: { backgroundColor: colors.headerBackground },
           headerLeft: ({ canGoBack }) => {
             if (canGoBack) {
               return (
@@ -128,18 +108,20 @@ export default function RootLayout() {
                     width: 36,
                     height: 36,
                     borderRadius: 18,
-                    backgroundColor: "#ffffff",
+                    backgroundColor: colors.surfaceBackground,
                     alignItems: "center",
                     justifyContent: "center",
                     marginLeft: Platform.OS === "ios" ? 0 : 8,
-                    shadowColor: "#000",
+                    shadowColor: colors.shadow,
                     shadowOffset: { width: 0, height: 2 },
                     shadowOpacity: 0.05,
                     shadowRadius: 3,
                     elevation: 1,
+                    borderWidth: 1,
+                    borderColor: colors.border,
                   }}
                 >
-                  <Ionicons name="chevron-back" size={20} color="#000" style={{ marginLeft: -2 }} />
+                  <Ionicons name="chevron-back" size={20} color={colors.primaryText} style={{ marginLeft: -2 }} />
                 </Pressable>
               );
             }
@@ -150,7 +132,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="vessels" options={{ title: "Vessel Schedule" }} />
         <Stack.Screen name="cranes" options={{ title: "Crane Status" }} />
-        <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under 현황" }} />
+        <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under Status" }} />
         <Stack.Screen name="yt" options={{ title: "YT Count" }} />
         <Stack.Screen name="weather" options={{ title: "Pilotage/Weather" }} />
         <Stack.Screen name="monitor" options={{ title: "Monitoring" }} />
@@ -160,5 +142,13 @@ export default function RootLayout() {
         <Stack.Screen name="monitor-yeosu" options={{ title: "Yeosu Pilotage" }} />
       </Stack>
     </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AppPreferencesProvider>
+      <AppShell />
+    </AppPreferencesProvider>
   );
 }

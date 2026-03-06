@@ -1,7 +1,11 @@
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { ScreenLinkCard } from "../components/ScreenLinkCard";
+import { useAppPreferences } from "../lib/appPreferences";
 
 export default function MonitorMenuScreen() {
+  const { colors } = useAppPreferences();
+  const styles = createStyles(colors);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerCard}>
@@ -35,17 +39,19 @@ export default function MonitorMenuScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 16, gap: 10 },
-  headerCard: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 6,
-  },
-  title: { fontSize: 18, fontWeight: "800", color: "#123a5e" },
-  subtitle: { fontSize: 13, color: "#2d5578" },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 16, gap: 10 },
+    headerCard: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 12,
+      gap: 6,
+    },
+    title: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
+    subtitle: { fontSize: 13, color: colors.secondaryText },
+  });
+}
