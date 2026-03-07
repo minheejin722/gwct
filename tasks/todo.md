@@ -1802,3 +1802,62 @@
     - night shift completion now expects `06:45 KST` end (`2026-03-07T21:45:00.000Z`)
     - worked duration changed from `390분` to `375분`
     - validation errors now expect `06:45~18:45` and `18:45~06:45`
+
+## GC Multi-Vessel Assignment Plan (2026-03-07)
+- [x] Reconfirm the current GC multi-vessel data path and append this implementation/review block before coding.
+- [x] Add a persisted GC assignment state store with latest-DB backfill support so active vessel evidence survives restart and event clears.
+- [x] Update server GC work-state resolution to use assignment evidence for `active`, `checking`, and `scheduled` rows.
+- [x] Update mobile Crane Status UI for the new `작업유무 체크중` state and sort priority.
+- [x] Add focused regression/API tests for assignment persistence, backfill, and row classification.
+- [x] Run server/mobile verification plus a live/manual GC184 check, then write the review here.
+
+## GC Multi-Vessel Assignment Review
+- Root cause:
+  - `buildGcCraneLiveRows()` was classifying each same-GC row independently from `remainingSubtotal + crew assigned`, so one GC with two positive vessel rows could render both as `작업중`.
+  - That ignored the only reliable live evidence for "which vessel is actually being worked now": per-vessel subtotal decreases across successive `gwct_work_status` snapshots.
+- Implementation:
+  - Added persisted GC assignment state store:
+    - `apps/server/src/services/gc/assignmentStore.ts`
+    - stores `activeVesselName`, `pendingVesselNames`, `lastEvidenceAt`, `lastSeenAt` per GC181~190
+    - survives restart and `DELETE /api/events`
+  - Added repository snapshot-group reader:
+    - `apps/server/src/db/repository.ts`
+    - reads recent `gwct_work_status` seenAt groups for backfill
+  - Wired assignment updates into live scrape flow:
+    - `apps/server/src/services/monitorService.ts`
+    - after each `gwct_work_status` save, compares previous/current rows and updates persisted assignment state
+  - Refined backfill after live validation:
+    - initial `latest 2 groups` idea was not sufficient for the current GC184 history because the most recent 2 groups were unchanged
+    - `ensureGcAssignmentState(...)` now scans multiple recent snapshot groups in order and replays them to recover the last proven active vessel when possible
+  - Updated crane live row resolution:
+    - `apps/server/src/services/gc/workState.ts`
+    - same-GC multi-vessel rows now resolve as:
+      - proven vessel => `active`
+      - unresolved multi-vessel => `checking`
+      - pending/non-active vessel => `scheduled`
+      - no remaining => `idle`
+  - Updated `/api/cranes/live`:
+    - `apps/server/src/routes/api.ts`
+    - loads ensured assignment state before building rows
+  - Updated mobile Crane Status UI:
+    - `apps/mobile/app/cranes.tsx`
+    - added `checking` state label `작업유무 체크중`
+    - added neutral badge style
+    - sort order now `active -> checking -> scheduled -> idle`
+- Tests added/updated:
+  - `apps/server/tests/gc-work-state.test.ts`
+  - `apps/server/tests/gc-assignment-store.test.ts`
+  - `apps/server/tests/crane-live-api.test.ts`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-work-state.test.ts tests/gc-assignment-store.test.ts tests/crane-live-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd test` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+- Live/manual check:
+  - Cleared persisted GC assignment state and forced backfill from the current local DB history.
+  - Result for `GC184`:
+    - `MAERSK SALTORO` => `active`
+    - `CMA CGM CORTE REAL` => `scheduled`
+  - Backfilled state recovered:
+    - `activeVesselName = MAERSK SALTORO`
+    - `pendingVesselNames = [CMA CGM CORTE REAL]`

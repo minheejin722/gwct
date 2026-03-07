@@ -20,6 +20,7 @@ import {
   countWorkingGcCranes,
 } from "../services/dashboard/summary.js";
 import { loadEquipmentLatestSnapshot } from "../services/equipment/latestStore.js";
+import { ensureGcAssignmentState } from "../services/gc/assignmentStore.js";
 import { buildGcCraneLiveRows } from "../services/gc/workState.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
@@ -223,10 +224,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/cranes/live", async () => {
-    const [gcLatest, equipmentLatest, workStatusRows] = await Promise.all([
+    const [gcLatest, equipmentLatest, workStatusRows, assignmentState] = await Promise.all([
       loadGcLatestSnapshot(),
       loadEquipmentLatestSnapshot(),
       deps.repo.getLatestCraneStatuses("gwct_work_status"),
+      ensureGcAssignmentState(deps.repo),
     ]);
 
     if (!gcLatest && !equipmentLatest && workStatusRows.length === 0) {
@@ -237,7 +239,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       };
     }
 
-    const rows = buildGcCraneLiveRows(gcLatest, equipmentLatest, workStatusRows);
+    const rows = buildGcCraneLiveRows(gcLatest, equipmentLatest, workStatusRows, assignmentState);
     return {
       source: "gwct_gc_remaining",
       count: rows.length,

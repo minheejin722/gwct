@@ -5,7 +5,7 @@ import { useEndpoint } from "../hooks/useEndpoint";
 import { buildCraneRenderKey, reportDuplicateCraneRows } from "../lib/craneKeys";
 import { API_URLS } from "../lib/config";
 
-type GcWorkState = "active" | "scheduled" | "idle" | "unknown";
+type GcWorkState = "active" | "checking" | "scheduled" | "idle" | "unknown";
 
 interface CraneLiveItem extends CraneStatus {
   workState: GcWorkState;
@@ -21,10 +21,13 @@ function workStatePriority(state: GcWorkState): number {
   if (state === "active") {
     return 0;
   }
-  if (state === "scheduled") {
+  if (state === "checking") {
     return 1;
   }
-  return 2;
+  if (state === "scheduled") {
+    return 2;
+  }
+  return 3;
 }
 
 function craneNumber(craneId: string): number {
@@ -36,6 +39,9 @@ function workStateLabel(state: GcWorkState): string {
   if (state === "active") {
     return "작업중";
   }
+  if (state === "checking") {
+    return "작업유무 체크중";
+  }
   if (state === "scheduled") {
     return "작업 예정";
   }
@@ -45,6 +51,9 @@ function workStateLabel(state: GcWorkState): string {
 function workStateBadgeStyle(state: GcWorkState) {
   if (state === "active") {
     return styles.badgeActive;
+  }
+  if (state === "checking") {
+    return styles.badgeChecking;
   }
   if (state === "scheduled") {
     return styles.badgeScheduled;
@@ -109,6 +118,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   badgeActive: { backgroundColor: "#e9f8ec", borderColor: "#b7dfc0" },
+  badgeChecking: { backgroundColor: "#f8f5ea", borderColor: "#d9cfaa" },
   badgeScheduled: { backgroundColor: "#eef5ff", borderColor: "#b7cfee" },
   badgeIdle: { backgroundColor: "#f3f5f7", borderColor: "#d4dbe2" },
   badgeText: { fontSize: 11, fontWeight: "800", color: "#204666" },

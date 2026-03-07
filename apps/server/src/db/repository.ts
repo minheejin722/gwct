@@ -257,6 +257,42 @@ export class Repository {
     }));
   }
 
+  async getLatestCraneStatusSnapshotGroups(source: SourceId, limit: number) {
+    const take = Math.max(1, Math.trunc(limit));
+    const seenAtRows = await prisma.craneStatus.findMany({
+      where: { source },
+      distinct: ["seenAt"],
+      orderBy: { seenAt: "desc" },
+      take,
+      select: { seenAt: true },
+    });
+
+    const groups: Array<{ seenAt: string; items: CraneStatus[] }> = [];
+    for (const entry of seenAtRows) {
+      const rows = await prisma.craneStatus.findMany({
+        where: { source, seenAt: entry.seenAt },
+      });
+      groups.push({
+        seenAt: entry.seenAt.toISOString(),
+        items: rows.map((row) => ({
+          source: row.source as SourceId,
+          craneId: row.craneId,
+          vesselName: row.vesselName,
+          dischargeDone: row.dischargeDone,
+          loadDone: row.loadDone,
+          dischargeRemaining: row.dischargeRemaining,
+          loadRemaining: row.loadRemaining,
+          totalRemaining: row.totalRemaining,
+          progressPercent: row.progressPercent,
+          signature: row.signature,
+          seenAt: row.seenAt.toISOString(),
+        })),
+      });
+    }
+
+    return groups;
+  }
+
   async saveEquipmentStatuses(items: EquipmentLoginStatus[]) {
     if (!items.length) {
       return;

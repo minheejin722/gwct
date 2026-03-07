@@ -38,6 +38,11 @@ import {
 import { observeYtWorkSnapshot } from "./ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "./yeosu/effectiveState.js";
 import { saveVesselEtaAdjustmentRecord } from "./vessels/etaAdjustmentStore.js";
+import {
+  buildNextGcAssignmentState,
+  loadGcAssignmentState,
+  saveGcAssignmentState,
+} from "./gc/assignmentStore.js";
 
 export interface RunOptions {
   mode?: "live" | "fixture";
@@ -388,6 +393,16 @@ export class MonitorService {
     if (bundle.cranes.length) {
       const prev = await this.repo.getLatestCraneStatuses(source);
       await this.repo.saveCraneStatuses(bundle.cranes);
+      if (source === "gwct_work_status") {
+        const currentAssignmentState = await loadGcAssignmentState();
+        const nextAssignmentState = buildNextGcAssignmentState(
+          currentAssignmentState,
+          prev,
+          bundle.cranes,
+          occurredAt,
+        );
+        await saveGcAssignmentState(nextAssignmentState);
+      }
       if (prev.length) {
         if (source === "gwct_gc_remaining") {
           alerts.push(
