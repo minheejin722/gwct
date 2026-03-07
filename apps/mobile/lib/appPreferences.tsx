@@ -99,7 +99,7 @@ async function registerCurrentDevice(): Promise<DeviceSettingsResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      deviceId: localDeviceId(),
+      deviceId: await localDeviceId(),
       platform: Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : "web",
       expoPushToken,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul",
@@ -186,11 +186,7 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        if (patch.alertsEnabled) {
-          await registerCurrentDevice();
-        }
-
-        const response = await fetch(API_URLS.updateSettings(localDeviceId()), {
+        const response = await fetch(API_URLS.updateSettings(await localDeviceId()), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),

@@ -18,7 +18,7 @@ interface LiveAlertMessage {
 const localSseAlertsEnabled = process.env.EXPO_PUBLIC_LOCAL_SSE_ALERTS !== "false";
 
 function AppShell() {
-  const { alertsEnabled, colors } = useAppPreferences();
+  const { alertsEnabled, resolvedTheme, colors } = useAppPreferences();
   const lastSeenEventIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -90,7 +90,7 @@ function AppShell() {
 
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style={resolvedTheme === "dark" ? "light" : "dark"} />
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: colors.headerBackground },

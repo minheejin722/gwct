@@ -53,8 +53,8 @@ function rankLabel(index: number, total: number): string {
 }
 
 export default function WorkTimeScreen() {
-  const { colors } = useAppPreferences();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, resolvedTheme } = useAppPreferences();
+  const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<YTWorkSessionResponse>(API_URLS.ytWorkTime, {
     pollMs: 20000,
   });
@@ -230,7 +230,7 @@ export default function WorkTimeScreen() {
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.screenBackground },
     content: { padding: 16, gap: 14, paddingBottom: 28 },
@@ -274,7 +274,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
     dayButton: { backgroundColor: colors.accent },
     nightButton: { backgroundColor: colors.accentMuted },
     buttonDisabled: { opacity: 0.65 },
-    actionButtonText: { color: "#ffffff", fontSize: 15, fontWeight: "800" },
+    actionButtonText: { color: resolvedTheme === "dark" ? "#1c2b36" : "#ffffff", fontSize: 15, fontWeight: "800" },
     helperText: { fontSize: 12, lineHeight: 18, color: colors.secondaryText },
     sessionCard: {
       backgroundColor: colors.surfaceBackground,

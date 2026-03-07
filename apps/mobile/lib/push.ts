@@ -1,5 +1,6 @@
-﻿import * as Notifications from "expo-notifications";
+import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
+import * as Application from "expo-application";
 
 const EVENT_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 const seenAlertEvents = new Map<string, number>();
@@ -125,8 +126,24 @@ export async function getExpoPushTokenSafe(): Promise<string | null> {
   }
 }
 
-export function localDeviceId(): string {
-  const model = Device.modelName || "ios";
-  const osVersion = Device.osVersion || "unknown";
-  return `${model}-${osVersion}`.replace(/\s+/g, "-").toLowerCase();
+let _cachedDeviceId: Promise<string> | null = null;
+
+export function localDeviceId(): Promise<string> {
+  if (!_cachedDeviceId) {
+    _cachedDeviceId = (async () => {
+      try {
+        if (Device.osName === "iOS" || Device.osName === "iPadOS") {
+          const vendorId = await Application.getIosIdForVendorAsync();
+          if (vendorId) return vendorId;
+        }
+        const androidId = Application.getAndroidId?.();
+        if (androidId) return androidId;
+      } catch {
+        // fall through to random id
+      }
+      return `generated-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    })();
+  }
+  return _cachedDeviceId;
 }
+

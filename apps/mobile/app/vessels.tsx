@@ -161,7 +161,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
       flex: 1,
       gap: 3,
     },
-    title: { fontSize: 17, fontWeight: "800", color: colors.primaryText },
+    title: { fontSize: 17, fontWeight: "800", color: "#1c2b36" },
     subtitle: { fontSize: 12, color: colors.secondaryText, lineHeight: 18 },
     watchChip: {
       minWidth: 42,
@@ -184,12 +184,12 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
       width: 34,
       fontSize: 13,
       fontWeight: "800",
-      color: colors.primaryText,
+      color: "#1c2b36",
     },
     timeValue: {
       fontSize: 15,
       fontWeight: "700",
-      color: colors.primaryText,
+      color: "#1c2b36",
     },
     etaChangeBox: {
       marginTop: 2,

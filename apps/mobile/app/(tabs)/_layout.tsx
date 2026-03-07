@@ -43,8 +43,11 @@ export default function TabLayout() {
       <Tabs.Screen
         name="monitor-tab"
         options={{
-          title: "Monitor",
-          href: "/monitor",
+          title: "Monitoring",
+          headerStyle: { backgroundColor: colors.screenBackground },
+          headerTintColor: colors.primaryText,
+          headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
+          headerShadowVisible: false,
           tabBarIcon: ({ color }) => <Ionicons name="grid-outline" size={24} color={color} />,
         }}
       />
@@ -65,7 +68,10 @@ export default function TabLayout() {
         name="status-tab"
         options={{
           title: "Status",
-          href: "/equipment",
+          headerStyle: { backgroundColor: colors.screenBackground },
+          headerTintColor: colors.primaryText,
+          headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
+          headerShadowVisible: false,
           tabBarIcon: ({ color }) => <Ionicons name="construct-outline" size={24} color={color} />,
         }}
       />
