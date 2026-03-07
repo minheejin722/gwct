@@ -3,6 +3,7 @@ import {
   DeviceRegistrationSchema,
   type AlertEvent,
   type SourceId,
+  YTWorkAutoModeSchema,
   YTWorkShiftModeSchema,
 } from "@gwct/shared";
 import { z } from "zod";
@@ -28,6 +29,7 @@ import {
   getYtWorkSessionView,
   isYtWorkShiftWindowError,
   observeYtWorkSnapshot,
+  setYtWorkAutomationMode,
   startYtWorkSession,
 } from "../services/ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services/yeosu/effectiveState.js";
@@ -107,6 +109,10 @@ const CleanupRunInputSchema = z.object({
 
 const StartYtWorkSessionInputSchema = z.object({
   mode: YTWorkShiftModeSchema,
+});
+
+const UpdateYtWorkAutomationInputSchema = z.object({
+  mode: YTWorkAutoModeSchema,
 });
 
 function toLegacyGcThresholdPayload(settings: Awaited<ReturnType<typeof loadMonitorSettings>>) {
@@ -336,18 +342,32 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     }
 
     try {
-      const session = await startYtWorkSession(parsed.data.mode, new Date().toISOString(), latest.ytUnits);
-      return {
-        session,
-        latestYtCapturedAt: latest.capturedAt,
-        hasLiveSnapshot: true,
-      };
+      await setYtWorkAutomationMode("off", new Date().toISOString());
+      await startYtWorkSession(parsed.data.mode, new Date().toISOString(), latest.ytUnits);
+      return getYtWorkSessionView(new Date().toISOString(), latest.capturedAt, true);
     } catch (error) {
       if (isYtWorkShiftWindowError(error)) {
         return reply.code(400).send({ error: (error as Error).message });
       }
       throw error;
     }
+  });
+
+  app.post("/api/yt/work-time/automation", async (request, reply) => {
+    const parsed = UpdateYtWorkAutomationInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const now = new Date().toISOString();
+    await setYtWorkAutomationMode(parsed.data.mode, now);
+
+    const latest = await loadEquipmentLatestSnapshot();
+    if (latest) {
+      await observeYtWorkSnapshot(latest.ytUnits, latest.capturedAt);
+    }
+
+    return getYtWorkSessionView(new Date().toISOString(), latest?.capturedAt || null, Boolean(latest));
   });
 
   app.get("/api/weather/live", async () => {

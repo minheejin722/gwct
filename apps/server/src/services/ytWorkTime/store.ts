@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,4 +19,8 @@ export async function loadYtWorkTimeRawState<T>(): Promise<T | null> {
 export async function saveYtWorkTimeRawState<T>(state: T): Promise<void> {
   await mkdir(configDir, { recursive: true });
   await writeFile(configFile, JSON.stringify(state, null, 2), "utf8");
+}
+
+export async function clearYtWorkTimeRawStateForTest(): Promise<void> {
+  await rm(configFile, { force: true });
 }

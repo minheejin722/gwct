@@ -1861,3 +1861,54 @@
   - Backfilled state recovered:
     - `activeVesselName = MAERSK SALTORO`
     - `pendingVesselNames = [CMA CGM CORTE REAL]`
+
+## Work Auto Count Modes Plan (2026-03-08)
+- [x] Reconfirm the current Work session storage, API responses, monitor loop integration point, and append this implementation/review block before coding.
+- [x] Add persisted Work automation state with the three user-facing modes (`24시간 주야`, `주간 예약`, `야간 예약`) while keeping the existing session store separate.
+- [x] Implement server-side auto reconciliation for session start/end, manual-start override, and the new `POST /api/yt/work-time/automation` flow.
+- [x] Extend shared types and `GET/POST /api/yt/work-time*` responses to expose automation state and next auto start metadata.
+- [x] Update the mobile `Work` screen to add the `Auto Count` card without disrupting the current card hierarchy or manual `Shift Start` flow.
+- [x] Add focused service/API regression coverage, run relevant tests/typecheck, and document the review.
+
+## Work Auto Count Modes Review
+- Root cause:
+  - The Work feature only persisted a single manual session state, so counting started only after explicitly pressing `주간근무 시작` or `야간근무 시작`.
+  - There was no persisted automation mode, no route for configuring it, and no server-side reconcile path that could open the correct shift on the first `gwct_equipment_status` snapshot after `06:45` or `18:45`.
+- Implementation:
+  - Added shared Work automation types in `packages/shared/src/schemas/domain.ts`:
+    - `YTWorkAutoMode`
+    - `YTWorkAutomationState`
+    - `YTWorkSessionResponse.automation`
+  - Added persisted automation store:
+    - `apps/server/src/services/ytWorkTime/automationStore.ts`
+    - JSON path: `apps/server/data/config/yt_work_time_automation.json`
+  - Extended `apps/server/src/services/ytWorkTime/service.ts`:
+    - added shift-window helpers for current/next reserved windows
+    - added pure `reconcileYtWorkSnapshotState(...)` for `full_auto`, `reserve_day`, `reserve_night`
+    - added reservation expiry handling and automation view materialization
+    - guarded against stale snapshots so older `capturedAt` values do not overwrite newer session state
+  - Updated `apps/server/src/routes/api.ts`:
+    - `GET /api/yt/work-time` now returns `automation`
+    - `POST /api/yt/work-time/start` clears automation before manual start
+    - added `POST /api/yt/work-time/automation`
+  - Updated `apps/mobile/app/(tabs)/worktime.tsx`:
+    - kept the existing card flow
+    - added a separate `Auto Count` card under `Shift Start`
+    - layout: one full-width `24시간 주야` tile, two half-width `주간 예약`/`야간 예약` tiles, and a small `자동 끔` pill
+    - added one-line status strip for current mode / next auto start / auto-running state
+    - when automation is active, manual start now shows a confirm alert before disabling automation and starting manually
+  - Added API config entry:
+    - `apps/mobile/lib/config.ts` -> `ytWorkTimeAutomation`
+- Tests added/updated:
+  - `apps/server/tests/yt-work-time.test.ts`
+    - full-auto day/night/day rollover
+    - one-shot day/night reservation start + auto-clear
+    - missed reservation expiry without next-day repeat
+  - `apps/server/tests/yt-work-time-api.test.ts`
+    - `POST /api/yt/work-time/automation` immediate reconcile + response shape
+    - manual `POST /api/yt/work-time/start` clears automation
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd test` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
