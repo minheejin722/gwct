@@ -1,5 +1,6 @@
 import Fastify from "fastify";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { YTUnitSnapshot } from "@gwct/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearYtWorkTimeRawStateForTest } from "../src/services/ytWorkTime/store.js";
 
 if (process.env.MODE !== "live" && process.env.MODE !== "fixture") {
@@ -14,29 +15,37 @@ vi.mock("../src/services/equipment/latestStore.js", () => ({
 
 const createdApps: Array<Awaited<ReturnType<typeof Fastify>>> = [];
 
-function buildLatestSnapshot(capturedAt: string) {
+function buildLatestSnapshot(
+  capturedAt: string,
+  ytUnits: YTUnitSnapshot[] = [
+    {
+      ytNo: "YT23",
+      driverName: "Hong",
+      loginTime: "03-07 10:00",
+      logoutTime: null,
+      hkName: null,
+      stopReason: null,
+      semanticState: "active" as const,
+      fingerprint: `YT23:Hong:active:${capturedAt}`,
+    },
+  ],
+) {
   return {
     source: "gwct_equipment_status" as const,
     sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=D&s=A",
     capturedAt,
-    ytCount: 1,
-    ytKnown: 1,
-    ytUnits: [
-      {
-        ytNo: "YT23",
-        driverName: "Hong",
-        loginTime: "03-07 10:00",
-        hkName: null,
-        stopReason: null,
-        semanticState: "active" as const,
-        fingerprint: `YT23:Hong:active:${capturedAt}`,
-      },
-    ],
+    ytCount: ytUnits.filter((unit) => unit.semanticState === "active").length,
+    ytKnown: ytUnits.length,
+    ytUnits,
     gcStates: [],
   };
 }
 
 describe.sequential("yt work-time api", () => {
+  beforeEach(async () => {
+    await clearYtWorkTimeRawStateForTest();
+  });
+
   afterEach(async () => {
     while (createdApps.length) {
       const app = createdApps.pop();
@@ -82,6 +91,7 @@ describe.sequential("yt work-time api", () => {
       session: { mode: string; shiftWindowStartedAt: string; startedAt: string } | null;
       latestYtCapturedAt: string | null;
       hasLiveSnapshot: boolean;
+      shiftStatus: { state: string; reason: string; mode: string | null; label: string; detail: string | null };
     };
 
     expect(payload.latestYtCapturedAt).toBe("2026-03-07T01:00:00.000Z");
@@ -91,6 +101,67 @@ describe.sequential("yt work-time api", () => {
       shiftWindowStartedAt: "2026-03-06T21:45:00.000Z",
       startedAt: "2026-03-07T01:00:00.000Z",
     });
+    expect(payload.shiftStatus).toMatchObject({
+      state: "collecting",
+      reason: "active_shift",
+      mode: "day",
+      label: "집계중",
+    });
+  });
+
+  it("returns a paused team-off indicator after the grace window if no YT is logged in", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-03-06T22:20:00.000Z"));
+    loadEquipmentLatestSnapshotMock.mockResolvedValue(
+      buildLatestSnapshot("2026-03-06T22:20:00.000Z", [
+        {
+          ytNo: "YT23",
+          driverName: null,
+          loginTime: null,
+          logoutTime: null,
+          hkName: null,
+          stopReason: null,
+          semanticState: "logged_out" as const,
+          fingerprint: "YT23:-:logged_out:2026-03-06T22:20:00.000Z",
+        },
+      ]),
+    );
+
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {
+        getRecentAlerts: async () => [],
+      } as any,
+      monitorService: {} as any,
+      sseHub: { broadcast() {} } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/yt/work-time",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json() as {
+      shiftStatus: { state: string; reason: string; mode: string | null; label: string; detail: string | null };
+      session: { drivers: Array<unknown> } | null;
+    };
+
+    expect(payload.shiftStatus).toMatchObject({
+      state: "paused",
+      reason: "team_off",
+      mode: "day",
+      label: "일시 정지",
+    });
+    expect(payload.session?.drivers).toHaveLength(0);
   });
 
   it("removes the old manual and automation POST endpoints", async () => {

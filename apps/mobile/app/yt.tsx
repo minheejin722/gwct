@@ -1,7 +1,8 @@
-﻿import { useMemo } from "react";
+import { useMemo } from "react";
 import type { YTUnitSnapshot } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 
 type SemanticState = YTUnitSnapshot["semanticState"];
@@ -49,6 +50,32 @@ function semanticLabel(state: SemanticState): string {
   return "로그아웃";
 }
 
+function semanticTone(
+  state: SemanticState,
+  resolvedTheme: "light" | "dark",
+  colors: ReturnType<typeof useAppPreferences>["colors"],
+) {
+  if (state === "active") {
+    return {
+      strong: colors.badgeBackground,
+      soft: resolvedTheme === "dark" ? "rgba(44,127,227,0.14)" : "#edf6ff",
+      border: resolvedTheme === "dark" ? "rgba(44,127,227,0.28)" : "#b8d6f2",
+    };
+  }
+  if (state === "stopped") {
+    return {
+      strong: colors.warning,
+      soft: resolvedTheme === "dark" ? "rgba(255,203,107,0.12)" : "#fff7d6",
+      border: resolvedTheme === "dark" ? "rgba(255,203,107,0.26)" : "#f0d780",
+    };
+  }
+  return {
+    strong: colors.danger,
+    soft: resolvedTheme === "dark" ? "rgba(255,122,122,0.12)" : "#ffe9e9",
+    border: resolvedTheme === "dark" ? "rgba(255,122,122,0.26)" : "#efb5b5",
+  };
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -67,6 +94,8 @@ function formatLoggedOutTime(value: string | null | undefined): string {
 }
 
 export default function YtScreen() {
+  const { colors, resolvedTheme } = useAppPreferences();
+  const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, refresh, error } = useEndpoint<YtResponse>(API_URLS.yt, { pollMs: 20000 });
 
   const count = data?.ytCount ?? data?.snapshot?.totalLoggedIn ?? 0;
@@ -87,13 +116,20 @@ export default function YtScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={loading}
+          onRefresh={() => void refresh()}
+          tintColor={colors.accentMuted}
+          colors={[colors.badgeBackground]}
+        />
+      }
     >
       {error ? <Text style={styles.error}>서버 연결 실패, 재시도중…</Text> : null}
 
       <View style={styles.card}>
         <Text style={styles.title}>YT 현재 로그인</Text>
-        <Text style={[styles.count, isLow ? styles.low : styles.normal]}>
+        <Text style={[styles.count, { color: isLow ? colors.danger : colors.success }]}>
           {count} / {known}
         </Text>
         <Text style={styles.meta}>임계치: {threshold}</Text>
@@ -107,39 +143,22 @@ export default function YtScreen() {
         const showReason = Boolean(unit.stopReason);
         const timeLabel = semantic === "logged_out" ? "로그아웃" : "로그인";
         const timeValue = semantic === "logged_out" ? formatLoggedOutTime(unit.logoutTime) : unit.loginTime || "-";
+        const tone = semanticTone(semantic, resolvedTheme, colors);
         return (
           <View key={`${unit.ytNo}:${unit.fingerprint}`} style={styles.unitCard}>
             <View style={styles.unitHeader}>
               <Text style={styles.ytNo}>{unit.ytNo}</Text>
-              <View
-                style={[
-                  styles.badge,
-                  semantic === "active"
-                    ? styles.badgeActive
-                    : semantic === "stopped"
-                      ? styles.badgeStopped
-                      : styles.badgeLoggedOut,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.badgeText,
-                    semantic === "active"
-                      ? styles.badgeTextActive
-                      : semantic === "stopped"
-                        ? styles.badgeTextStopped
-                        : styles.badgeTextLoggedOut,
-                  ]}
-                >
-                  {semanticLabel(semantic)}
-                </Text>
+              <View style={[styles.badge, { backgroundColor: tone.soft, borderColor: tone.border }]}>
+                <Text style={[styles.badgeText, { color: tone.strong }]}>{semanticLabel(semantic)}</Text>
               </View>
             </View>
             <Text style={styles.row}>Cabin: {unit.driverName || "-"}</Text>
             <Text style={styles.row}>
               {timeLabel}: {timeValue}
             </Text>
-            <Text style={[styles.row, showReason ? styles.reason : null]}>중단사유: {unit.stopReason || "-"}</Text>
+            <Text style={[styles.row, showReason ? { color: colors.warning, fontWeight: "700" } : null]}>
+              중단사유: {unit.stopReason || "-"}
+            </Text>
           </View>
         );
       })}
@@ -149,43 +168,43 @@ export default function YtScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 16, gap: 10 },
-  error: {
-    backgroundColor: "#fde8e8",
-    borderWidth: 1,
-    borderColor: "#e8a8a8",
-    color: "#8b1a1a",
-    padding: 10,
-    borderRadius: 10,
-    fontWeight: "700",
-  },
-  card: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#d8e4f0", borderRadius: 12, padding: 14, gap: 5 },
-  title: { fontSize: 16, fontWeight: "700", color: "#123b60" },
-  count: { fontSize: 36, fontWeight: "800", marginTop: 8 },
-  normal: { color: "#145b1f" },
-  low: { color: "#9d1f1f" },
-  meta: { fontSize: 13, color: "#2e5a80" },
-  unitCard: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
-  },
-  unitHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  ytNo: { fontSize: 18, fontWeight: "800", color: "#123b60" },
-  badge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1 },
-  badgeActive: { backgroundColor: "#edf6ff", borderColor: "#b8d6f2" },
-  badgeStopped: { backgroundColor: "#fff7d6", borderColor: "#f0d780" },
-  badgeLoggedOut: { backgroundColor: "#ffe9e9", borderColor: "#efb5b5" },
-  badgeText: { fontSize: 12, fontWeight: "700" },
-  badgeTextActive: { color: "#215781" },
-  badgeTextStopped: { color: "#7a6200" },
-  badgeTextLoggedOut: { color: "#9d1f1f" },
-  row: { fontSize: 13, color: "#2e587d" },
-  reason: { color: "#7a6200", fontWeight: "700" },
-  empty: { textAlign: "center", marginTop: 30, color: "#5f7890" },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 16, gap: 10, paddingBottom: 28 },
+    error: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.12)" : "#fde8e8",
+      borderWidth: 1,
+      borderColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.26)" : "#e8a8a8",
+      color: colors.danger,
+      padding: 10,
+      borderRadius: 10,
+      fontWeight: "700",
+    },
+    card: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 14,
+      gap: 5,
+    },
+    title: { fontSize: 16, fontWeight: "700", color: colors.primaryText },
+    count: { fontSize: 36, fontWeight: "800", marginTop: 8 },
+    meta: { fontSize: 13, color: colors.secondaryText },
+    unitCard: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 12,
+      gap: 4,
+    },
+    unitHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    ytNo: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
+    badge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1 },
+    badgeText: { fontSize: 12, fontWeight: "700" },
+    row: { fontSize: 13, color: colors.secondaryText },
+    empty: { textAlign: "center", marginTop: 30, color: colors.secondaryText },
+  });
+}

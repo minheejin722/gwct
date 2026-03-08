@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 
 interface EquipmentMonitorResponse {
@@ -41,6 +42,23 @@ function clampThreshold(value: unknown): number {
   return Math.max(0, Math.trunc(parsed));
 }
 
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatCapturedAt(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return `${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 async function saveEquipmentConfig(payload: Record<string, unknown>) {
   const response = await fetch(API_URLS.monitorEquipment, {
     method: "POST",
@@ -53,7 +71,13 @@ async function saveEquipmentConfig(payload: Record<string, unknown>) {
   return response.json();
 }
 
+function statusText(enabled: boolean): string {
+  return enabled ? "ACTIVE" : "OFF";
+}
+
 export default function MonitorEquipmentScreen() {
+  const { colors, resolvedTheme } = useAppPreferences();
+  const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<EquipmentMonitorResponse>(API_URLS.monitorEquipment, {
     pollMs: 25000,
   });
@@ -68,6 +92,15 @@ export default function MonitorEquipmentScreen() {
     }
     setYtInput(String(data.yt.threshold));
   }, [data]);
+
+  const summary = useMemo(() => {
+    const rows = data?.gcStates || [];
+    return {
+      cabinReady: rows.filter((row) => Boolean(row.driverName)).length,
+      underReady: rows.filter((row) => Boolean(row.hkName)).length,
+      stopFlagged: rows.filter((row) => Boolean(row.stopReason)).length,
+    };
+  }, [data?.gcStates]);
 
   const stepYt = (delta: number) => {
     const next = clampThreshold(Number(ytInput) + delta);
@@ -131,17 +164,51 @@ export default function MonitorEquipmentScreen() {
     >
       {error ? <Text style={styles.error}>Server connection failed, retrying...</Text> : null}
 
-      <View style={styles.card}>
-        <Text style={styles.title}>Equipment Monitor</Text>
-        <Text style={styles.meta}>Last captured: {data?.latestCapturedAt || "-"}</Text>
-        <Text style={styles.meta}>Current YT login count: {data?.ytCount ?? 0}</Text>
+      <View style={styles.heroCard}>
+        <View style={styles.heroHeader}>
+          <View style={styles.heroTitleBlock}>
+            <Text style={styles.heroEyebrow}>Monitoring</Text>
+            <Text style={styles.heroTitle}>Equipment Monitor</Text>
+          </View>
+          <View style={styles.heroOrb} />
+        </View>
+
+        <View style={styles.heroChipRow}>
+          <View style={styles.heroChip}>
+            <Text style={styles.heroChipLabel}>Last captured</Text>
+            <Text style={styles.heroChipValue}>{formatCapturedAt(data?.latestCapturedAt || null)}</Text>
+          </View>
+          <View style={styles.heroChip}>
+            <Text style={styles.heroChipLabel}>YT live count</Text>
+            <Text style={styles.heroChipValue}>{data?.ytCount ?? 0}</Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>YT Count Monitor</Text>
-        <Text style={styles.meta}>Status: {data?.yt.enabled ? "ACTIVE" : "INACTIVE"}</Text>
-        <Text style={styles.meta}>State machine: {data?.yt.state || "-"}</Text>
-        <View style={styles.stepRow}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleBlock}>
+            <Text style={styles.sectionTitle}>YT Count Monitor</Text>
+          </View>
+          <View style={[styles.statusBadge, data?.yt.enabled ? styles.statusBadgeActive : styles.statusBadgeOff]}>
+            <Text style={[styles.statusBadgeText, data?.yt.enabled ? styles.statusBadgeTextActive : styles.statusBadgeTextOff]}>
+              {statusText(Boolean(data?.yt.enabled))}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.metricStrip}>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>State machine</Text>
+            <Text style={styles.metricValue}>{data?.yt.state || "-"}</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>Threshold</Text>
+            <Text style={styles.metricValue}>{clampThreshold(ytInput)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.stepShell}>
           <Pressable style={styles.stepButton} onPress={() => stepYt(-1)}>
             <Text style={styles.stepText}>-</Text>
           </Pressable>
@@ -150,6 +217,7 @@ export default function MonitorEquipmentScreen() {
             <Text style={styles.stepText}>+</Text>
           </Pressable>
         </View>
+
         <View style={styles.buttonRow}>
           <Pressable
             style={[styles.confirmButton, savingYt ? styles.disabled : null]}
@@ -169,8 +237,39 @@ export default function MonitorEquipmentScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>GC180~GC190 Cabin/Under Monitor</Text>
-        <Text style={styles.meta}>Status: {data?.gcStaff.enabled ? "ACTIVE" : "INACTIVE"}</Text>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleBlock}>
+            <Text style={styles.sectionTitle}>GC180~GC190 Cabin/Under Monitor</Text>
+          </View>
+          <View
+            style={[styles.statusBadge, data?.gcStaff.enabled ? styles.statusBadgeActive : styles.statusBadgeOff]}
+          >
+            <Text
+              style={[
+                styles.statusBadgeText,
+                data?.gcStaff.enabled ? styles.statusBadgeTextActive : styles.statusBadgeTextOff,
+              ]}
+            >
+              {statusText(Boolean(data?.gcStaff.enabled))}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.metricStrip}>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>Cabin ready</Text>
+            <Text style={styles.metricValue}>{summary.cabinReady}</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>Under ready</Text>
+            <Text style={styles.metricValue}>{summary.underReady}</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>Stop flagged</Text>
+            <Text style={styles.metricValue}>{summary.stopFlagged}</Text>
+          </View>
+        </View>
+
         <View style={styles.buttonRow}>
           <Pressable
             style={[styles.confirmButton, savingGcStaff ? styles.disabled : null]}
@@ -188,86 +287,233 @@ export default function MonitorEquipmentScreen() {
           </Pressable>
         </View>
       </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Latest GC180~190 State</Text>
-        {(data?.gcStates || []).map((row) => (
-          <Text key={row.gcNo} style={styles.row}>
-            GC{row.gcNo} Cabin={row.driverName || "-"} Under={row.hkName || "-"} Login={row.loginTime || "-"} Stop={row.stopReason || "-"}
-          </Text>
-        ))}
-      </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 16, gap: 10 },
-  error: {
-    backgroundColor: "#fde8e8",
-    borderWidth: 1,
-    borderColor: "#e8a8a8",
-    color: "#8b1a1a",
-    padding: 10,
-    borderRadius: 10,
-    fontWeight: "700",
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
-  title: { fontSize: 17, fontWeight: "800", color: "#123a5e" },
-  sectionTitle: { fontSize: 15, fontWeight: "800", color: "#123a5e" },
-  meta: { fontSize: 12, color: "#315a7f" },
-  row: { fontSize: 12, color: "#2b5377" },
-  stepRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  stepButton: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    borderColor: "#bfd3e7",
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f7fbff",
-  },
-  stepText: { fontSize: 18, fontWeight: "800", color: "#123a5e" },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#c4d5e7",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#f9fbff",
-    fontSize: 16,
-    fontWeight: "700",
-    textAlign: "center",
-    color: "#123a5e",
-  },
-  buttonRow: { flexDirection: "row", gap: 8 },
-  confirmButton: {
-    flex: 1,
-    backgroundColor: "#0f3b63",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  confirmText: { color: "#fff", fontWeight: "700" },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: "#f4f7fb",
-    borderWidth: 1,
-    borderColor: "#bfd3e7",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  cancelText: { color: "#123a5e", fontWeight: "700" },
-  disabled: { opacity: 0.6 },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
+  const heroBackground = resolvedTheme === "dark" ? "#13202f" : "#0f3b63";
+  const heroBorder = resolvedTheme === "dark" ? "#243548" : "#1b4e7a";
+  const heroText = "#f4f8fc";
+  const heroMuted = resolvedTheme === "dark" ? "#b8c6d5" : "#c8dcf0";
+  const inputBackground = resolvedTheme === "dark" ? "#1c2630" : "#f8fbff";
+
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 16, gap: 14, paddingBottom: 28 },
+    error: {
+      backgroundColor: "#fde8e8",
+      borderWidth: 1,
+      borderColor: "#e8a8a8",
+      color: "#8b1a1a",
+      padding: 10,
+      borderRadius: 10,
+      fontWeight: "700",
+    },
+    heroCard: {
+      backgroundColor: heroBackground,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: heroBorder,
+      padding: 18,
+      gap: 16,
+      shadowColor: "#000000",
+      shadowOpacity: resolvedTheme === "dark" ? 0.22 : 0.16,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 4,
+    },
+    heroHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    heroTitleBlock: {
+      flex: 1,
+      gap: 4,
+    },
+    heroEyebrow: {
+      fontSize: 12,
+      fontWeight: "800",
+      letterSpacing: 1,
+      textTransform: "uppercase",
+      color: heroMuted,
+    },
+    heroTitle: {
+      fontSize: 24,
+      fontWeight: "900",
+      color: heroText,
+      lineHeight: 28,
+    },
+    heroOrb: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: "#6db6ff",
+      opacity: 0.95,
+      marginTop: 4,
+    },
+    heroChipRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    heroChip: {
+      minWidth: 98,
+      flexGrow: 1,
+      backgroundColor: "rgba(255,255,255,0.08)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.12)",
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 3,
+    },
+    heroChipLabel: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: heroMuted,
+    },
+    heroChipValue: {
+      fontSize: 18,
+      fontWeight: "800",
+      color: heroText,
+    },
+    card: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 18,
+      padding: 16,
+      gap: 14,
+    },
+    cardHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    cardTitleBlock: {
+      flex: 1,
+      gap: 2,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: colors.primaryText,
+      lineHeight: 22,
+    },
+    statusBadge: {
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderWidth: 1,
+    },
+    statusBadgeActive: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(128,213,143,0.12)" : "#e7f6eb",
+      borderColor: resolvedTheme === "dark" ? "rgba(128,213,143,0.28)" : "#c6e8cd",
+    },
+    statusBadgeOff: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(255,203,107,0.10)" : "#fff3df",
+      borderColor: resolvedTheme === "dark" ? "rgba(255,203,107,0.24)" : "#f0ddbc",
+    },
+    statusBadgeText: {
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.6,
+    },
+    statusBadgeTextActive: {
+      color: colors.success,
+    },
+    statusBadgeTextOff: {
+      color: colors.warning,
+    },
+    metricStrip: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    metricCard: {
+      flex: 1,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.elevatedBackground,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 4,
+    },
+    metricLabel: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.secondaryText,
+    },
+    metricValue: {
+      fontSize: 18,
+      fontWeight: "800",
+      color: colors.primaryText,
+    },
+    stepShell: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    stepButton: {
+      width: 42,
+      height: 42,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.elevatedBackground,
+    },
+    stepText: {
+      fontSize: 20,
+      fontWeight: "800",
+      color: colors.primaryText,
+    },
+    input: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: inputBackground,
+      fontSize: 18,
+      fontWeight: "800",
+      textAlign: "center",
+      color: colors.primaryText,
+    },
+    buttonRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    confirmButton: {
+      flex: 1,
+      backgroundColor: colors.accent,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: "center",
+    },
+    confirmText: {
+      color: resolvedTheme === "dark" ? "#0e1620" : "#ffffff",
+      fontWeight: "800",
+    },
+    cancelButton: {
+      flex: 1,
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: "center",
+    },
+    cancelText: {
+      color: colors.primaryText,
+      fontWeight: "800",
+    },
+    disabled: { opacity: 0.6 },
+  });
+}

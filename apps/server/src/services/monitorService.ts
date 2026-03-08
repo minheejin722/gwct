@@ -23,6 +23,7 @@ import {
   summarizeScheduleFocus,
   type ScheduleFocusSnapshot,
 } from "./scheduleFocus/latestStore.js";
+import { computeNextGwctEtaObservedState } from "./scheduleFocus/observedState.js";
 import {
   loadEquipmentLatestSnapshot,
   saveEquipmentLatestSnapshot,
@@ -32,6 +33,7 @@ import {
 import { buildYtUnitSnapshotFromEquipment, countLoggedInYtUnits } from "./equipment/ytUnits.js";
 import {
   loadMonitorSettings,
+  setGwctEtaObservedState,
   setYeosuObservedState,
   setYtMonitorState,
 } from "./monitorConfig/store.js";
@@ -371,6 +373,48 @@ export class MonitorService {
     const monitorSettings = await loadMonitorSettings();
 
     if (bundle.vessels.length) {
+      if (source === "gwct_schedule_list") {
+        const trackedItems: ScheduleFocusSnapshot["items"] = bundle.vessels.map((item, index) => {
+          const rawIndex = Number(item.rawLabelMap?._watchIndex || index + 1);
+          const indexInWatchWindow = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
+          const etaNormalized =
+            typeof item.rawLabelMap?._etaNormalized === "string" && item.rawLabelMap._etaNormalized.trim().length
+              ? item.rawLabelMap._etaNormalized.trim()
+              : null;
+          const rowColorRaw = typeof item.rawLabelMap?._rowColor === "string" ? item.rawLabelMap._rowColor : "unknown";
+          const rowColor = ["green", "yellow", "cyan", "unknown"].includes(rowColorRaw)
+            ? (rowColorRaw as ScheduleFocusSnapshot["items"][number]["rowColor"])
+            : "unknown";
+          return {
+            indexInWatchWindow,
+            voyage: item.terminalVoyage || item.vesselKey,
+            vesselName: item.vesselName,
+            eta: item.eta,
+            etaNormalized,
+            rowColor,
+            rowClass: typeof item.rawLabelMap?._rowClass === "string" ? item.rawLabelMap._rowClass : null,
+          };
+        });
+
+        const observedState = computeNextGwctEtaObservedState({
+          items: trackedItems,
+          trackingCount: monitorSettings.gwctEtaMonitor.trackingCount,
+          previousSignature: monitorSettings.gwctEtaMonitor.lastTrackedSignature,
+          previousChangedAt: monitorSettings.gwctEtaMonitor.lastChangedAt,
+          observedAt: occurredAt,
+        });
+
+        if (
+          observedState.signature !== monitorSettings.gwctEtaMonitor.lastTrackedSignature ||
+          observedState.lastChangedAt !== monitorSettings.gwctEtaMonitor.lastChangedAt
+        ) {
+          await setGwctEtaObservedState({
+            lastTrackedSignature: observedState.signature,
+            lastChangedAt: observedState.lastChangedAt,
+          });
+        }
+      }
+
       const prev = await this.repo.getLatestVesselItems(source);
       await this.repo.saveVesselItems(bundle.vessels);
       if (prev.length) {

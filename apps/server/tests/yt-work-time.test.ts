@@ -2,6 +2,7 @@
 import type { YTUnitSnapshot, YTSemanticState } from "@gwct/shared";
 import {
   applyYtWorkSnapshot,
+  deriveYtWorkShiftIndicator,
   materializeYtWorkSession,
   reconcileYtWorkSnapshotState,
   startYtWorkSessionState,
@@ -78,6 +79,20 @@ describe("YT work-time session rules", () => {
     expect(view?.completedAt).toBe("2026-03-07T21:45:00.000Z");
     expect(view?.drivers[0]?.totalWorkedMinutes).toBe(375);
     expect(view?.drivers[0]?.totalWorkedLabel).toBe("6시간 15분");
+  });
+
+  it("reports a paused break indicator during the fixed lunch window", () => {
+    const sessionStartedAt = "2026-03-07T02:50:00.000Z"; // 11:50 KST
+    const session = startYtWorkSessionState("day", sessionStartedAt, [unit("YT23", "Hong", "active")]);
+    const view = materializeYtWorkSession(session, "2026-03-07T03:10:00.000Z"); // 12:10 KST
+    const indicator = deriveYtWorkShiftIndicator(view, "2026-03-07T03:10:00.000Z", true);
+
+    expect(indicator).toMatchObject({
+      state: "paused",
+      reason: "break_time",
+      mode: "day",
+      label: "일시 정지",
+    });
   });
 
   it("preserves the last stop reason when a stopped driver fully logs out", () => {
@@ -238,6 +253,44 @@ describe("YT work-time session rules", () => {
     expect(session?.mode).toBe("day");
     expect(session?.shiftWindowStartedAt).toBe("2026-03-06T21:45:00.000Z");
     expect(session?.startedAt).toBe("2026-03-07T01:00:00.000Z");
+  });
+
+  it("pauses the shift after the +30 minute grace passes with zero logged-in YTs and resumes on the next login", () => {
+    let session = reconcileYtWorkSnapshotState(
+      null,
+      [unit("YT23", null, "logged_out")],
+      "2026-03-06T22:20:00.000Z", // 07:20 KST
+    );
+
+    let view = materializeYtWorkSession(session, "2026-03-06T22:20:00.000Z");
+    let indicator = deriveYtWorkShiftIndicator(view, "2026-03-06T22:20:00.000Z", true);
+
+    expect(view?.drivers).toHaveLength(0);
+    expect(indicator).toMatchObject({
+      state: "paused",
+      reason: "team_off",
+      mode: "day",
+      label: "일시 정지",
+    });
+
+    session = reconcileYtWorkSnapshotState(
+      session,
+      [unit("YT23", "Hong", "active")],
+      "2026-03-06T23:00:00.000Z", // 08:00 KST
+    );
+
+    view = materializeYtWorkSession(session, "2026-03-06T23:10:00.000Z"); // 08:10 KST
+    indicator = deriveYtWorkShiftIndicator(view, "2026-03-06T23:10:00.000Z", true);
+
+    expect(indicator).toMatchObject({
+      state: "collecting",
+      reason: "active_shift",
+      mode: "day",
+      label: "집계중",
+    });
+    expect(view?.drivers).toHaveLength(1);
+    expect(view?.drivers[0]?.driverName).toBe("Hong");
+    expect(view?.drivers[0]?.totalWorkedMinutes).toBe(10);
   });
 
   it("rolls the stored session forward automatically when the shift boundary changes", () => {

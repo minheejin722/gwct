@@ -217,10 +217,32 @@ export const YTWorkSessionSchema = z.object({
 });
 export type YTWorkSession = z.infer<typeof YTWorkSessionSchema>;
 
+export const YTWorkShiftIndicatorStateSchema = z.enum(["collecting", "paused", "idle"]);
+export type YTWorkShiftIndicatorState = z.infer<typeof YTWorkShiftIndicatorStateSchema>;
+
+export const YTWorkShiftIndicatorReasonSchema = z.enum([
+  "active_shift",
+  "break_time",
+  "awaiting_login",
+  "team_off",
+  "no_snapshot",
+]);
+export type YTWorkShiftIndicatorReason = z.infer<typeof YTWorkShiftIndicatorReasonSchema>;
+
+export const YTWorkShiftIndicatorSchema = z.object({
+  state: YTWorkShiftIndicatorStateSchema,
+  reason: YTWorkShiftIndicatorReasonSchema,
+  mode: YTWorkShiftModeSchema.nullable(),
+  label: z.string(),
+  detail: z.string().nullable(),
+});
+export type YTWorkShiftIndicator = z.infer<typeof YTWorkShiftIndicatorSchema>;
+
 export const YTWorkSessionResponseSchema = z.object({
   session: YTWorkSessionSchema.nullable(),
   latestYtCapturedAt: z.string().nullable(),
   hasLiveSnapshot: z.boolean(),
+  shiftStatus: YTWorkShiftIndicatorSchema,
 });
 export type YTWorkSessionResponse = z.infer<typeof YTWorkSessionResponseSchema>;
 

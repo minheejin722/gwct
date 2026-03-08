@@ -8,6 +8,8 @@ export type WeatherNormalizedState = "none" | "partial" | "all";
 export interface GwctEtaMonitorConfig {
   enabled: boolean;
   trackingCount: number;
+  lastTrackedSignature: string | null;
+  lastChangedAt: string | null;
 }
 
 export interface GcRemainingMonitorRule {
@@ -70,6 +72,8 @@ const DEFAULT_CONFIG: MonitorSettings = {
   gwctEtaMonitor: {
     enabled: false,
     trackingCount: 11,
+    lastTrackedSignature: null,
+    lastChangedAt: null,
   },
   gcRemainingMonitors: Object.fromEntries(
     GC_KEYS.map((gc) => [gc, { ...DEFAULT_GC_RULE }]),
@@ -156,6 +160,8 @@ function normalizeConfig(input: Partial<MonitorSettings> | null | undefined): Mo
         input?.gwctEtaMonitor?.trackingCount,
         DEFAULT_CONFIG.gwctEtaMonitor.trackingCount,
       ),
+      lastTrackedSignature: normalizeText(input?.gwctEtaMonitor?.lastTrackedSignature),
+      lastChangedAt: normalizeText(input?.gwctEtaMonitor?.lastChangedAt),
     },
     gcRemainingMonitors,
     equipmentMonitor: {
@@ -263,6 +269,18 @@ export async function setYtMonitorState(
         state,
         stateInitialized,
       },
+    },
+  });
+}
+
+export async function setGwctEtaObservedState(input: {
+  lastTrackedSignature: string | null;
+  lastChangedAt?: string | null;
+}): Promise<MonitorSettings> {
+  return saveMonitorSettings({
+    gwctEtaMonitor: {
+      lastTrackedSignature: input.lastTrackedSignature,
+      lastChangedAt: input.lastChangedAt || null,
     },
   });
 }

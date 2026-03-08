@@ -30,6 +30,7 @@ export default function HomeScreen() {
   const threshold = ytData?.threshold ?? 0;
   const ytCount = data?.ytLoggedInCount ?? 0;
   const isYtLow = ytCount < threshold;
+  const isYtHigh = ytCount > threshold;
 
   return (
     <ScrollView
@@ -109,7 +110,7 @@ export default function HomeScreen() {
             <Text style={styles.summaryText}>GC 작업중 : {data?.workingCraneCount ?? 0}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <FontAwesome5 name="truck" size={12} color={colors.icon} />
+            <MaterialCommunityIcons name="forklift" size={14} color={colors.icon} />
             <Text style={styles.summaryText}>야드 장비 로그인 : {data?.supportEquipmentLoginCount ?? 0}</Text>
           </View>
           <View style={styles.summaryRow}>
@@ -130,7 +131,14 @@ export default function HomeScreen() {
 
         <View style={styles.ytCard}>
           <Text style={styles.ytTitle}>YT</Text>
-          <Text style={[styles.ytNumber, isYtLow ? styles.ytNumberLow : styles.ytNumberNormal]}>{ytCount}</Text>
+          <Text
+            style={[
+              styles.ytNumber,
+              isYtLow ? styles.ytNumberLow : isYtHigh ? styles.ytNumberHigh : styles.ytNumberNormal,
+            ]}
+          >
+            {ytCount}
+          </Text>
         </View>
       </View>
     </ScrollView>
@@ -233,6 +241,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
     ytTitle: { fontSize: 28, fontWeight: "600", color: colors.primaryText, marginBottom: 4 },
     ytNumber: { fontSize: 62, fontWeight: "300", letterSpacing: -2 },
     ytNumberNormal: { color: colors.primaryText },
+    ytNumberHigh: { color: colors.badgeBackground },
     ytNumberLow: { color: colors.danger },
   });
 }

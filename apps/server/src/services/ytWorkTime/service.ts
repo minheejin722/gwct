@@ -1,6 +1,7 @@
 import type {
   YTUnitSnapshot,
   YTWorkDriverSummary,
+  YTWorkShiftIndicator,
   YTWorkStopReasonCounter,
   YTWorkStopReasonCounterKind,
   YTWorkSession,
@@ -17,6 +18,7 @@ const KST_OFFSET = "+09:00";
 const DAY_SHIFT_START = { hour: 6, minute: 45 } as const;
 const DAY_SHIFT_END = { hour: 18, minute: 45 } as const;
 const NIGHT_SHIFT_START = DAY_SHIFT_END;
+const SHIFT_LOGIN_GRACE_MS = 30 * 60 * 1000;
 
 type TrackedStopReasonRule = {
   kind: YTWorkStopReasonCounterKind;
@@ -239,6 +241,55 @@ function isSessionActiveForWindow(session: StoredYtWorkSession | null, shiftWind
     session.shiftWindowStartedAt === shiftWindow.shiftWindowStartedAt &&
     session.endsAt === shiftWindow.endsAt
   );
+}
+
+function isMaterializedSessionForWindow(session: YTWorkSession | null, shiftWindow: ShiftWindow | null): boolean {
+  if (!session || !shiftWindow || session.status !== "active") {
+    return false;
+  }
+
+  return (
+    session.mode === shiftWindow.mode &&
+    session.shiftWindowStartedAt === shiftWindow.shiftWindowStartedAt &&
+    session.endsAt === shiftWindow.endsAt
+  );
+}
+
+function isWithinBreakWindow(asOf: string, breaks: YTWorkSessionBreak[]): boolean {
+  const asOfMs = new Date(asOf).getTime();
+  if (!Number.isFinite(asOfMs)) {
+    return false;
+  }
+
+  return breaks.some((breakWindow) => {
+    const startMs = new Date(breakWindow.startAt).getTime();
+    const endMs = new Date(breakWindow.endAt).getTime();
+    return Number.isFinite(startMs) && Number.isFinite(endMs) && asOfMs >= startMs && asOfMs < endMs;
+  });
+}
+
+function hasActiveDriver(session: YTWorkSession | null): boolean {
+  if (!session) {
+    return false;
+  }
+
+  return session.drivers.some((driver) => driver.latestState === "active" && Boolean(driver.currentSegmentStartedAt));
+}
+
+function buildShiftIndicator(
+  state: YTWorkShiftIndicator["state"],
+  reason: YTWorkShiftIndicator["reason"],
+  mode: YTWorkShiftMode | null,
+  label: string,
+  detail: string | null,
+): YTWorkShiftIndicator {
+  return {
+    state,
+    reason,
+    mode,
+    label,
+    detail,
+  };
 }
 
 function normalizeDriverName(value: string | null | undefined): string | null {
@@ -708,6 +759,50 @@ export function materializeYtWorkSession(
   };
 }
 
+export function deriveYtWorkShiftIndicator(
+  session: YTWorkSession | null,
+  asOf: string,
+  hasLiveSnapshot: boolean,
+): YTWorkShiftIndicator {
+  const currentWindow = getShiftWindowForObservedAt(asOf);
+
+  if (!currentWindow || !hasLiveSnapshot) {
+    return buildShiftIndicator("idle", "no_snapshot", currentWindow?.mode || null, "공백", "집계 데이터 대기 중");
+  }
+
+  if (!isMaterializedSessionForWindow(session, currentWindow)) {
+    return buildShiftIndicator("idle", "no_snapshot", currentWindow.mode, "공백", "현재 교대 데이터 대기 중");
+  }
+
+  if (isWithinBreakWindow(asOf, currentWindow.breaks)) {
+    return buildShiftIndicator(
+      "paused",
+      "break_time",
+      currentWindow.mode,
+      "일시 정지",
+      currentWindow.mode === "day" ? "점심 휴식 12:00 - 13:00" : "새벽 휴식 00:00 - 01:00",
+    );
+  }
+
+  if (hasActiveDriver(session)) {
+    return buildShiftIndicator(
+      "collecting",
+      "active_shift",
+      currentWindow.mode,
+      "집계중",
+      currentWindow.mode === "day" ? "주간 자동 집계" : "야간 자동 집계",
+    );
+  }
+
+  const graceDeadlineMs = new Date(currentWindow.shiftWindowStartedAt).getTime() + SHIFT_LOGIN_GRACE_MS;
+  const asOfMs = new Date(asOf).getTime();
+  if (!Number.isFinite(asOfMs) || asOfMs < graceDeadlineMs) {
+    return buildShiftIndicator("paused", "awaiting_login", currentWindow.mode, "일시 정지", "로그인 대기 중");
+  }
+
+  return buildShiftIndicator("paused", "team_off", currentWindow.mode, "일시 정지", "30분 이상 무로그인");
+}
+
 export function reconcileYtWorkSnapshotState(
   session: StoredYtWorkSession | null,
   units: YTUnitSnapshot[],
@@ -760,9 +855,12 @@ export async function getYtWorkSessionView(
     await saveYtWorkSessionState(finalizedSession);
   }
 
+  const materializedSession = materializeYtWorkSession(finalizedSession, asOf);
+
   return {
-    session: materializeYtWorkSession(finalizedSession, asOf),
+    session: materializedSession,
     latestYtCapturedAt,
     hasLiveSnapshot,
+    shiftStatus: deriveYtWorkShiftIndicator(materializedSession, asOf, hasLiveSnapshot),
   };
 }

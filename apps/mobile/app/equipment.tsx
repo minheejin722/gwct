@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 
 type GcCrewStatus = "stopped" | "staffed" | "empty";
@@ -69,7 +70,15 @@ function isVisibleGc(gcNo: number): boolean {
   return gcNo >= 181 && gcNo <= 190;
 }
 
-function StatusMark({ status, size }: { status: GcCrewStatus; size: number }) {
+function StatusMark({
+  status,
+  size,
+  styles,
+}: {
+  status: GcCrewStatus;
+  size: number;
+  styles: ReturnType<typeof createStyles>;
+}) {
   if (status === "staffed") {
     return <View style={[styles.circleMark, { width: size, height: size, borderRadius: size / 2 }]} />;
   }
@@ -91,6 +100,8 @@ function StatusMark({ status, size }: { status: GcCrewStatus; size: number }) {
 }
 
 export default function EquipmentScreen() {
+  const { colors, resolvedTheme } = useAppPreferences();
+  const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const latest = useEndpoint<EquipmentLatestResponse>(API_URLS.equipmentLatest, { pollMs: 25000 });
 
   const gcStates = useMemo<GcCrewRow[]>(
@@ -129,22 +140,29 @@ export default function EquipmentScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={latest.loading} onRefresh={() => void latest.refresh()} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={latest.loading}
+          onRefresh={() => void latest.refresh()}
+          tintColor={colors.accentMuted}
+          colors={[colors.badgeBackground]}
+        />
+      }
     >
       {latest.error ? <Text style={styles.error}>서버 연결 실패, 재시도중…</Text> : null}
 
       <View style={styles.summaryStrip}>
         <View style={styles.legendRow}>
           <View style={styles.legendItem} accessibilityLabel={`작업중 ${summary.staffed}`}>
-            <StatusMark status="staffed" size={22} />
+            <StatusMark status="staffed" size={22} styles={styles} />
             <Text style={[styles.summaryCount, styles.statusTextStaffed]}>{summary.staffed}</Text>
           </View>
           <View style={styles.legendItem} accessibilityLabel={`중단 ${summary.stopped}`}>
-            <StatusMark status="stopped" size={22} />
+            <StatusMark status="stopped" size={22} styles={styles} />
             <Text style={[styles.summaryCount, styles.statusTextStopped]}>{summary.stopped}</Text>
           </View>
           <View style={styles.legendItem} accessibilityLabel={`작업 안함 ${summary.empty}`}>
-            <StatusMark status="empty" size={22} />
+            <StatusMark status="empty" size={22} styles={styles} />
             <Text style={[styles.summaryCount, styles.statusTextEmpty]}>{summary.empty}</Text>
           </View>
         </View>
@@ -159,7 +177,7 @@ export default function EquipmentScreen() {
             <View style={styles.headerRow}>
               <Text style={styles.gcTitle}>GC{gc.gcNo}</Text>
               <View style={styles.statusChip} accessibilityLabel={statusLabel(gc.crewStatus)}>
-                <StatusMark status={gc.crewStatus} size={18} />
+                <StatusMark status={gc.crewStatus} size={18} styles={styles} />
               </View>
             </View>
 
@@ -195,141 +213,143 @@ export default function EquipmentScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 12, gap: 8 },
-  error: {
-    backgroundColor: "#fde8e8",
-    borderWidth: 1,
-    borderColor: "#e8a8a8",
-    color: "#8b1a1a",
-    padding: 8,
-    borderRadius: 10,
-    fontWeight: "700",
-  },
-  summaryStrip: {
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  legendRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  summaryCount: { fontSize: 22, fontWeight: "800" },
-  meta: { fontSize: 11, color: "#5d7892" },
-  gcCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    padding: 10,
-    gap: 6,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  gcTitle: { fontSize: 15, fontWeight: "800", color: "#143a5d" },
-  statusChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 26,
-    height: 26,
-  },
-  statusTextStaffed: {
-    color: "#1d5ea8",
-  },
-  statusTextStopped: {
-    color: "#b32828",
-  },
-  statusTextEmpty: {
-    color: "#6b7280",
-  },
-  circleMark: {
-    backgroundColor: "#2b6fcf",
-  },
-  triangleMark: {
-    width: 0,
-    height: 0,
-    backgroundColor: "transparent",
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "#c63333",
-    borderStyle: "solid",
-  },
-  squareMark: {
-    backgroundColor: "#8b95a1",
-  },
-  inlineRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  leftColumn: {
-    width: "36%",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    minWidth: 0,
-  },
-  rightColumn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    minWidth: 0,
-  },
-  reasonGroup: {
-    borderRadius: 7,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginLeft: -6, // offset the padding so text aligns with the 'Under' column above
-    alignSelf: "flex-start",
-  },
-  reasonGroupStopped: {
-    backgroundColor: "#fff0f0",
-    borderWidth: 1,
-    borderColor: "#e7b0b0",
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#5c7892",
-  },
-  value: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#204666",
-  },
-  reasonValue: {
-    color: "#204666",
-  },
-  stopLabel: {
-    color: "#9a1e1e",
-  },
-  stopValue: {
-    fontWeight: "800",
-    color: "#7f1616",
-  },
-  empty: {
-    textAlign: "center",
-    marginTop: 30,
-    color: "#5f7890",
-  },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 12, gap: 8, paddingBottom: 24 },
+    error: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.12)" : "#fde8e8",
+      borderWidth: 1,
+      borderColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.26)" : "#e8a8a8",
+      color: colors.danger,
+      padding: 8,
+      borderRadius: 10,
+      fontWeight: "700",
+    },
+    summaryStrip: {
+      backgroundColor: colors.surfaceBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 6,
+    },
+    legendRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    legendItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    summaryCount: { fontSize: 22, fontWeight: "800" },
+    meta: { fontSize: 11, color: colors.secondaryText },
+    gcCard: {
+      backgroundColor: colors.surfaceBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 10,
+      gap: 6,
+    },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    gcTitle: { fontSize: 15, fontWeight: "800", color: colors.primaryText },
+    statusChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      width: 26,
+      height: 26,
+    },
+    statusTextStaffed: {
+      color: colors.badgeBackground,
+    },
+    statusTextStopped: {
+      color: colors.danger,
+    },
+    statusTextEmpty: {
+      color: colors.secondaryText,
+    },
+    circleMark: {
+      backgroundColor: colors.badgeBackground,
+    },
+    triangleMark: {
+      width: 0,
+      height: 0,
+      backgroundColor: "transparent",
+      borderLeftColor: "transparent",
+      borderRightColor: "transparent",
+      borderBottomColor: colors.danger,
+      borderStyle: "solid",
+    },
+    squareMark: {
+      backgroundColor: resolvedTheme === "dark" ? "#6f7b89" : "#8b95a1",
+    },
+    inlineRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    leftColumn: {
+      width: "36%",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      minWidth: 0,
+    },
+    rightColumn: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      minWidth: 0,
+    },
+    reasonGroup: {
+      borderRadius: 7,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      marginLeft: -6,
+      alignSelf: "flex-start",
+    },
+    reasonGroupStopped: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.10)" : "#fff0f0",
+      borderWidth: 1,
+      borderColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.24)" : "#e7b0b0",
+    },
+    label: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.secondaryText,
+    },
+    value: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: "600",
+      color: colors.primaryText,
+    },
+    reasonValue: {
+      color: colors.primaryText,
+    },
+    stopLabel: {
+      color: colors.danger,
+    },
+    stopValue: {
+      fontWeight: "800",
+      color: colors.danger,
+    },
+    empty: {
+      textAlign: "center",
+      marginTop: 30,
+      color: colors.secondaryText,
+    },
+  });
+}

@@ -1902,3 +1902,322 @@
   - `npm.cmd run typecheck` ✅
   - `npm.cmd test` ✅
   - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Work Rules Card + Shift Pause Plan (2026-03-08)
+- [x] Reconfirm the current Work ranking screen structure and replace the old top banners with a screenshot-matched rules card plus a compact status shape indicator.
+- [x] Extend the Work backend response with a derived aggregate shift status that the UI can map to `blue circle / red triangle / gray square`.
+- [x] Implement the new `교대 시작 +30분 무로그인 => 일시정지, 이후 첫 로그인 즉시 재개` rule without disturbing the existing driver-by-driver accumulation and ranking logic.
+- [x] Add focused regression coverage for the new no-login pause/resume behavior, run relevant verification, and document the review.
+
+## Work Rules Card + Shift Pause Review
+- Root cause:
+  - The Work screen still had the previous auto-shift summary banners, which no longer matched the new operator-facing requirement.
+  - The backend also did not expose a single aggregate shift status for the requested `blue circle / red triangle / gray square` indicator.
+- Implementation:
+  - Extended the Work response contract in `packages/shared/src/schemas/domain.ts` with `shiftStatus`:
+    - `state = collecting | paused | idle`
+    - `reason = active_shift | break_time | awaiting_login | team_off | no_snapshot`
+  - Updated `apps/server/src/services/ytWorkTime/service.ts`:
+    - added `deriveYtWorkShiftIndicator(...)`
+    - `break_time` is raised during fixed lunch/midnight rest windows
+    - if the current shift is past `+30분` and there are still zero active YT logins, the aggregate state becomes `paused/team_off`
+    - if any YT logs in later in the same shift, the same session immediately returns to `collecting` and counting resumes from that login snapshot
+    - driver-level accumulation/ranking logic was left intact, so only real active segments continue to add work time
+  - Rebuilt `apps/mobile/app/(tabs)/worktime.tsx`:
+    - removed the old `YT 기사 일한 시간` and current-shift summary banners
+    - added a top rules card based on the provided screenshot structure
+    - placed the large status shape in the top-right whitespace area
+    - mapped status visuals as:
+      - blue circle => `collecting`
+      - red triangle => `paused`
+      - gray square => `idle`
+    - kept the ranking card structure below and corrected the visible copy to clean Korean/English strings
+  - Font note:
+    - the repo does not contain a dedicated font asset matching the screenshot, so the rules card uses the native system bold font with the same emoji/text layout in dark and light themes
+- Tests added/updated:
+  - `apps/server/tests/yt-work-time.test.ts`
+    - lunch-break indicator regression
+    - `+30분 무로그인` pause and same-shift relogin resume regression
+  - `apps/server/tests/yt-work-time-api.test.ts`
+    - `GET /api/yt/work-time` now returns `shiftStatus`
+    - `team_off` response behavior when the latest snapshot has zero logged-in YTs after the grace window
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd test` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Equipment Monitor UI Refresh Plan (2026-03-08)
+- [x] Re-read the current `monitor-equipment` layout and remove the low-signal raw `Latest GC180~190 State` list box.
+- [x] Rebuild the screen with a theme-aware summary layout: hero status, tighter monitor config cards, and a bottom `Live Snapshot Focus` card that uses summary tiles and exception pills instead of raw rows.
+- [x] Run mobile typecheck, record the review, and capture the UI lesson from the user correction.
+
+## Equipment Monitor UI Refresh Review
+- Root cause:
+  - The old `Latest GC180~190 State` block was a verbose raw dump at the bottom of a configuration screen.
+  - It took a full card of space without helping the operator scan the important things quickly.
+- Implementation:
+  - Rebuilt [apps/mobile/app/monitor-equipment.tsx](/c:/coding/gwct/apps/mobile/app/monitor-equipment.tsx) as a theme-aware screen using the shared app palette instead of hard-coded light-only colors.
+  - Replaced the old bottom raw list with a `Live Snapshot Focus` card:
+    - 4 summary tiles: `Tracked GC`, `Cabin ready`, `Under ready`, `Stop flagged`
+    - exception pills for missing Cabin, missing Under, and Stop-set cranes
+    - success pill when the latest snapshot is clean
+  - Tightened the rest of the screen to match the new bottom section:
+    - top hero card for latest capture / YT count / tracked GC
+    - cleaner monitor cards with status badges, compact metric tiles, and the existing Confirm/Cancel controls
+- Result:
+  - The screen keeps the same functionality, but the space previously used by the raw GC list now works as a quick-glance dashboard.
+  - Operators can tell whether the latest snapshot is healthy and where the exceptions are without reading long per-row text.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Equipment Monitor Trim Plan (2026-03-08)
+- [x] Remove the weak-signal `Tracked GC` tile from the Equipment Monitor hero.
+- [x] Remove the entire bottom `Live Snapshot Focus` card and rebalance the remaining layout.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## Equipment Monitor Trim Review
+- Root cause:
+  - Even after the first refresh, the `Tracked GC` tile and the extra bottom focus card still read as low-value chrome compared with the actual monitor controls.
+- Implementation:
+  - Updated [apps/mobile/app/monitor-equipment.tsx](/c:/coding/gwct/apps/mobile/app/monitor-equipment.tsx) to remove the hero `Tracked GC` tile.
+  - Removed the entire `Live Snapshot Focus` card from the bottom of the screen.
+  - Folded the strongest leftover signal back into the GC monitor card by keeping `Cabin ready`, `Under ready`, and `Stop flagged` in the metric strip.
+- Result:
+  - The Equipment Monitor screen is shorter and more control-focused.
+  - The remaining summary information sits closer to the setting it belongs to instead of living in a separate decorative section.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Equipment Monitor Copy Trim Plan (2026-03-08)
+- [x] Remove the gray helper/description lines from the three visible Equipment Monitor cards.
+- [x] Keep the remaining spacing tidy without adding new UI elements.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## Equipment Monitor Copy Trim Review
+- Root cause:
+  - The three remaining Equipment Monitor cards still carried gray helper sentences that added visual weight without adding much operational value.
+- Implementation:
+  - Removed the helper/description text rows from [apps/mobile/app/monitor-equipment.tsx](/c:/coding/gwct/apps/mobile/app/monitor-equipment.tsx):
+    - hero card
+    - `YT Count Monitor` card
+    - `GC180~GC190 Cabin/Under Monitor` card
+  - Tightened the local title-block gaps so the cards still feel intentional after the copy removal.
+- Result:
+  - The screen reads cleaner and more control-focused.
+  - The three boxes now present title, status, metrics, and actions only.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Home YT Widget Threshold Color Plan (2026-03-08)
+- [x] Reconfirm how the home YT widget reads the configured threshold and where its current color condition is applied.
+- [x] Change the widget number color to three-way comparison: below threshold = red, exactly threshold = default dark text, above threshold = blue.
+- [x] Run mobile typecheck and record the review plus the UI lesson.
+
+## Home YT Widget Threshold Color Review
+- Root cause:
+  - The home YT widget only distinguished `low` vs `not low`, so operators could not tell at a glance when the live YT count was above the configured target.
+- Implementation:
+  - Updated [apps/mobile/app/(tabs)/index.tsx](/c:/coding/gwct/apps/mobile/app/(tabs)/index.tsx):
+    - kept the existing threshold source from `GET /api/yt/live`
+    - added a separate `isYtHigh` comparison (`ytCount > threshold`)
+    - mapped colors as:
+      - below threshold => `colors.danger`
+      - equal threshold => `colors.primaryText`
+      - above threshold => `colors.badgeBackground`
+- Result:
+  - The YT widget now reads as a three-state signal:
+    - red when short
+    - black/dark when on target
+    - blue when above target
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Yeosu Monitor UI Refresh Plan (2026-03-08)
+- [x] Re-read the current `monitor-yeosu` layout and identify which raw/internal labels are making the screen feel noisy.
+- [x] Rebuild the screen into a simpler, theme-aware status layout with clearer information hierarchy and operator-facing labels, while preserving the same API/actions.
+- [x] Run mobile typecheck and document the review plus the UI lesson.
+
+## Yeosu Monitor UI Refresh Review
+- Root cause:
+  - The old screen exposed internal keys like `lastRawText` and `lastNormalizedState` almost verbatim, so the whole page read like a debug dump instead of an operator tool.
+  - Every line had the same visual weight, which made it hard to tell current status, memory state, and actions apart.
+- Implementation:
+  - Rebuilt [apps/mobile/app/monitor-yeosu.tsx](/c:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx) with the shared app palette and a stronger layout hierarchy.
+  - New structure:
+    - hero card with live state pill, weather icon, monitor status, last capture, last change
+    - `Status Snapshot` card with two clear tiles: `Live Forecast` and `Stored Memory`
+    - `Signal Text` card for the current duty text and stored memory text
+    - `Monitor Switch` card with a compact active/off badge and direct `Enable` / `Disable` actions
+  - Replaced raw/internal wording with operator-facing labels:
+    - `lastNormalizedState` -> `Stored Memory`
+    - `lastRawText` -> `Stored Memory Text`
+    - `latestForecastState` -> `Live Forecast`
+  - Preserved the existing API flow and enable/disable behavior.
+- Result:
+  - The page is shorter, calmer, and easier to scan.
+  - The top of the screen now answers the important questions first: current weather state, whether monitoring is on, when it last changed, and what text caused the state.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Yeosu Monitor Trim Plan (2026-03-08)
+- [x] Replace the hero `Last captured` stat with `Last change` and remove the redundant separate `Last change` stat box.
+- [x] Remove the `Status Snapshot` card entirely and rebalance the remaining card flow.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## Yeosu Monitor Trim Review
+- Root cause:
+  - After the first redesign, `Last change` was still duplicated in the hero area and the separate `Status Snapshot` card repeated information the hero pill already communicated.
+- Implementation:
+  - Updated [apps/mobile/app/monitor-yeosu.tsx](/c:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx):
+    - replaced the hero `Last captured` tile with `Last change`
+    - removed the old extra `Last change` stat tile so the hero now has only `Monitor` and `Last change`
+    - removed the entire `Status Snapshot` card
+  - Kept the remaining `Signal Text` and `Monitor Switch` cards unchanged so the screen still exposes the useful context and controls.
+- Result:
+  - The screen is shorter and less repetitive.
+  - The hero now carries the key live status and transition timing, while the lower cards focus on text evidence and control.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## GWCT ETA Monitor UI Refresh Plan (2026-03-08)
+- [x] Re-read the current `monitor-gwct-eta` layout and identify which parts still read like a raw settings dump.
+- [x] Rebuild the screen into a theme-aware status-first layout with a clearer window-size control card and a denser watch-window preview list.
+- [x] Run mobile typecheck and document the review plus the UI lesson.
+
+## GWCT ETA Monitor UI Refresh Review
+- Root cause:
+  - The old GWCT ETA screen was functionally correct but visually thin: status, control, and preview all looked like the same level of plain text.
+  - The watch-window preview in particular read like a raw dump instead of an operational scan list.
+- Implementation:
+  - Rebuilt [apps/mobile/app/monitor-gwct-eta.tsx](/c:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx) with the shared app palette and a clearer hierarchy.
+  - New structure:
+    - hero card with monitor on/off pill, ferry icon, last capture, window size, preview row count
+    - `Watch Window Size` card with cleaner metric tiles, stepper, and direct `Enable` / `Disable` actions
+    - `Watch Window Preview` card using compact row cards instead of raw text lines
+  - Preview rows now show:
+    - watch-window index
+    - voyage
+    - vessel name
+    - ETA
+    - row-color-derived watch badge (`Watch Start`, `Watch`, `Stable`, `Unknown`)
+- Result:
+  - The screen is easier to read top-down: current monitor status first, setting control second, live watched vessels third.
+  - The preview now feels like a deliberate operational list instead of debug output.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## GWCT ETA Last Change Plan (2026-03-08)
+- [x] Reconfirm where GWCT ETA monitor currently gets its hero timestamp and identify the cleanest backend place to track a true trackingCount-scoped `lastChangedAt`.
+- [x] Add persisted observed-state tracking for the current top-N watch-window signature, expose `lastChangedAt` via the API, and switch the mobile hero from `Last capture` to `Last change`.
+- [x] Add focused regression coverage, run server/mobile verification, and document the review plus the lesson.
+
+## GWCT ETA Last Change Review
+- Root cause:
+  - The GWCT ETA screen was still showing the latest scrape time, which only says when the board was fetched.
+  - The user needed the more meaningful timestamp: when anything in the currently configured top-N watch window last changed.
+- Implementation:
+  - Extended [apps/server/src/services/monitorConfig/store.ts](/c:/coding/gwct/apps/server/src/services/monitorConfig/store.ts) so `gwctEtaMonitor` now keeps:
+    - `lastTrackedSignature`
+    - `lastChangedAt`
+  - Added [apps/server/src/services/scheduleFocus/observedState.ts](/c:/coding/gwct/apps/server/src/services/scheduleFocus/observedState.ts):
+    - builds a signature from the current tracked top-N schedule-focus rows
+    - updates `lastChangedAt` only when that signature changes
+  - Updated [apps/server/src/services/monitorService.ts](/c:/coding/gwct/apps/server/src/services/monitorService.ts) so each `gwct_schedule_list` scrape refreshes the ETA observed state using the current configured `trackingCount`.
+  - Updated [apps/server/src/routes/api.ts](/c:/coding/gwct/apps/server/src/routes/api.ts):
+    - `GET /api/monitors/gwct-eta` now returns `lastChangedAt`
+    - the route no longer leaks internal `lastTrackedSignature`
+    - `POST /api/monitors/gwct-eta` now returns the same public shape
+  - Updated [apps/mobile/app/monitor-gwct-eta.tsx](/c:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx) so the hero stat shows `Last change` instead of `Last capture`.
+- Result:
+  - The GWCT ETA monitor now shows the last meaningful change time for the configured watch window, not just the last scrape time.
+  - The timestamp is scoped to the user-selected `trackingCount`, so it reflects the actual monitored vessel set.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/gwct-eta-observed-state.test.ts tests/gwct-eta-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+  - `npm.cmd test` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## GWCT ETA Monitor Metric Trim Plan (2026-03-08)
+- [x] Remove the `Applied now` and `Available rows` metric boxes from the `Watch Window Size` card.
+- [x] Keep the control card balanced using only the stepper and action row.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## GWCT ETA Monitor Metric Trim Review
+- Root cause:
+  - The `Applied now` and `Available rows` tiles were repeating information already visible through the stepper value and the preview list itself.
+- Implementation:
+  - Updated [apps/mobile/app/monitor-gwct-eta.tsx](/c:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx) to remove both metric tiles from the `Watch Window Size` card.
+  - Kept the card focused on:
+    - title/status
+    - N stepper input
+    - Enable / Disable actions
+- Result:
+  - The control card is shorter and less repetitive.
+  - The remaining UI still communicates the configured N clearly through the input itself.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## GWCT ETA Monitor Copy Trim Plan (2026-03-08)
+- [x] Remove the gray helper description under the `Watch Window Size` card title.
+- [x] Keep the card spacing tidy without adding replacement copy.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## GWCT ETA Monitor Copy Trim Review
+- Root cause:
+  - The `Watch Window Size` card still had a gray helper sentence that repeated the obvious purpose of the control and added visual noise.
+- Implementation:
+  - Removed the helper sentence from [apps/mobile/app/monitor-gwct-eta.tsx](/c:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx).
+  - Tightened the title-block gap so the card remains visually balanced after the copy removal.
+- Result:
+  - The card now reads more cleanly as a direct control block.
+  - Title, status, stepper, and action buttons remain without extra filler text.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Home GWCT Icon Swap Plan (2026-03-08)
+- [x] Replace the `야드 장비 로그인` emoji/icon in the home GWCT widget with a forklift icon.
+- [x] Run mobile typecheck and document the follow-up review plus lesson.
+
+## Home GWCT Icon Swap Review
+- Root cause:
+  - The first icon swap to `FontAwesome5 name="forklift"` rendered as `?` because this app ships the free FontAwesome5 set, and `forklift` exists in `FontAwesome5 Pro` but not in `FontAwesome5 Free`.
+- Implementation:
+  - Updated [apps/mobile/app/(tabs)/index.tsx](/c:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) to use `MaterialCommunityIcons name="forklift"` on the `야드 장비 로그인` row instead of the unsupported FontAwesome5 glyph.
+- Result:
+  - The row icon now matches the yard-equipment context more directly and renders correctly instead of showing `?`.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Operations Screen Dark Mode Plan (2026-03-08)
+- [x] Audit the YT, GC, GC Cabin/Under, and GC Remaining screens for hard-coded light-theme colors.
+- [x] Convert all four screens to use the shared app palette so surfaces, borders, copy, badges, and controls adapt in dark mode.
+- [x] Verify the mobile workspace typechecks cleanly after the theme pass.
+- [x] Document the review and add a lesson that operational status screens need an explicit dark-mode pass.
+
+## Operations Screen Dark Mode Review
+- Root cause:
+  - The `YT`, `GC`, `GC Cabin/Under`, and `GC Remaining` screens were still using hard-coded light-theme colors even though the app already had a shared light/dark palette.
+  - That left dark mode with bright cards, pale borders, and low-contrast controls that looked like light-mode leftovers instead of native dark surfaces.
+- Implementation:
+  - Updated [apps/mobile/app/yt.tsx](/c:/coding/gwct/apps/mobile/app/yt.tsx) to use `useAppPreferences()` and a theme-aware style factory for screen background, cards, error banner, count color, and YT status badges.
+  - Updated [apps/mobile/app/cranes.tsx](/c:/coding/gwct/apps/mobile/app/cranes.tsx) to move crane cards and work-state badges onto palette-driven colors, including darker badge fills and contrast-safe text in dark mode.
+  - Updated [apps/mobile/app/equipment.tsx](/c:/coding/gwct/apps/mobile/app/equipment.tsx) so the summary strip, GC cards, Cabin/Under text rows, stop-reason chip, and circle/triangle/square state marks all adapt to light and dark themes.
+  - Updated [apps/mobile/app/monitor-gc-remaining.tsx](/c:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx) so the monitor header, cards, stepper controls, numeric input, confirm/cancel buttons, and status text use the shared palette in both themes.
+  - Added themed `RefreshControl` colors on all four screens so pull-to-refresh does not disappear against dark backgrounds.
+- Result:
+  - The four operational screens now render with actual dark surfaces, subdued borders, readable secondary text, and dark-mode-safe status accents instead of retaining light-only styling.
+  - Status chips and control surfaces keep the same semantics as before, but they now read cleanly in both light and dark mode.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)

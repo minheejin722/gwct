@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { YTWorkSessionResponse, YTSemanticState, YTWorkShiftMode } from "@gwct/shared";
+import type { YTWorkSessionResponse, YTSemanticState, YTWorkShiftIndicator } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { useAppPreferences } from "../../lib/appPreferences";
@@ -22,13 +22,9 @@ function formatDateTime(value: string | null): string {
   return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function modeLabel(mode: YTWorkShiftMode): string {
-  return mode === "day" ? "주간근무" : "야간근무";
-}
-
 function stateLabel(state: YTSemanticState): string {
   if (state === "active") {
-    return "작업중";
+    return "운전중";
   }
   if (state === "stopped") {
     return "중단";
@@ -43,6 +39,38 @@ function rankLabel(index: number, total: number): string {
   return `${index + 1}등`;
 }
 
+function buildFallbackShiftStatus(): YTWorkShiftIndicator {
+  return {
+    state: "idle",
+    reason: "no_snapshot",
+    mode: null,
+    label: "공백",
+    detail: "집계 데이터 대기 중",
+  };
+}
+
+function statusAccessibilityLabel(shiftStatus: YTWorkShiftIndicator): string {
+  return shiftStatus.detail ? `${shiftStatus.label}, ${shiftStatus.detail}` : shiftStatus.label;
+}
+
+function StatusShape({
+  shiftStatus,
+  styles,
+}: {
+  shiftStatus: YTWorkShiftIndicator;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (shiftStatus.reason === "break_time") {
+    return <View accessibilityLabel={statusAccessibilityLabel(shiftStatus)} style={styles.statusTriangle} />;
+  }
+
+  if (shiftStatus.state === "collecting") {
+    return <View accessibilityLabel={statusAccessibilityLabel(shiftStatus)} style={styles.statusCircle} />;
+  }
+
+  return <View accessibilityLabel={statusAccessibilityLabel(shiftStatus)} style={styles.statusSquare} />;
+}
+
 export default function WorkTimeScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
@@ -52,6 +80,7 @@ export default function WorkTimeScreen() {
 
   const session = data?.session || null;
   const drivers = session?.drivers || [];
+  const shiftStatus = data?.shiftStatus || buildFallbackShiftStatus();
 
   return (
     <ScrollView
@@ -61,40 +90,59 @@ export default function WorkTimeScreen() {
     >
       {error ? <Text style={styles.error}>서버 연결 실패: {error}</Text> : null}
 
-      <View style={styles.heroCard}>
-        <Text style={styles.heroTitle}>YT 기사 일한 시간</Text>
-        <Text style={styles.heroText}>주간 06:45~18:45, 야간 18:45~다음날 06:45를 자동 집계합니다.</Text>
-        <Text style={styles.heroText}>점심 12:00~13:00, 자정 00:00~01:00 휴식시간은 자동 제외됩니다.</Text>
-        <Text style={styles.heroMeta}>최근 YT 캡처: {formatDateTime(data?.latestYtCapturedAt || null)}</Text>
+      <View style={styles.rulesCard}>
+        <View style={styles.statusDock}>
+          <StatusShape shiftStatus={shiftStatus} styles={styles} />
+        </View>
+
+        <View style={styles.rulesBody}>
+          <Text style={styles.rulesTitle}>🚜 YT Work Hour Rules</Text>
+
+          <View style={styles.rulesSection}>
+            <Text style={styles.rulesSectionTitle}>⏱ Shift Schedule</Text>
+
+            <View style={styles.rulesRow}>
+              <Text style={styles.rulesMarker}>•</Text>
+              <Text style={styles.rulesIcon}>☀️</Text>
+              <Text style={styles.rulesItemText}>Day Shift: 06:45 - 18:45</Text>
+            </View>
+
+            <View style={styles.rulesRow}>
+              <Text style={styles.rulesMarker}>•</Text>
+              <Text style={styles.rulesIcon}>🌙</Text>
+              <Text style={styles.rulesItemText}>Night Shift: 18:45 - 06:45</Text>
+            </View>
+          </View>
+
+          <View style={styles.rulesSection}>
+            <Text style={styles.rulesSectionTitle}>🏗️ Time Adjustments</Text>
+
+            <View style={styles.rulesRow}>
+              <Text style={styles.rulesMarker}>•</Text>
+              <Text style={styles.rulesIcon}>＋</Text>
+              <Text style={styles.rulesItemText}>Over-height: +30 mins</Text>
+            </View>
+
+            <View style={styles.rulesRow}>
+              <Text style={styles.rulesMarker}>•</Text>
+              <Text style={styles.rulesIcon}>ー</Text>
+              <Text style={styles.rulesItemText}>Restroom Break: -15 mins</Text>
+            </View>
+          </View>
+        </View>
       </View>
 
-      {session ? (
-        <View style={styles.sessionCard}>
-          <Text style={styles.sectionTitle}>{modeLabel(session.mode)} 집계</Text>
-          <Text style={styles.meta}>Shift 시작: {formatDateTime(session.shiftWindowStartedAt)}</Text>
-          <Text style={styles.meta}>현재 집계 시작: {formatDateTime(session.startedAt)}</Text>
-          <Text style={styles.meta}>Shift 종료: {formatDateTime(session.endsAt)}</Text>
-          <Text style={styles.meta}>마지막 반영: {formatDateTime(session.observedAt)}</Text>
-        </View>
-      ) : (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>최근 YT 데이터를 기다리는 중입니다.</Text>
-          <Text style={styles.emptyText}>장비 스냅샷이 들어오면 현재 교대 기준으로 자동 집계가 시작됩니다.</Text>
-        </View>
-      )}
-
       <View style={styles.listCard}>
-        <Text style={styles.sectionTitle}>YT 기사 일한 시간 순위</Text>
+        <Text style={styles.sectionTitle}>YT Driver Work Hour Rank</Text>
+
         {!drivers.length ? (
-          <Text style={styles.emptyText}>아직 누적된 YT 기사 데이터가 없습니다.</Text>
+          <Text style={styles.emptyText}>아직 집계된 YT 기사 데이터가 없습니다.</Text>
         ) : (
           drivers.map((driver, index) => {
             const isInactive = driver.latestState === "stopped" || driver.latestState === "logged_out";
             const showReason = isInactive && Boolean(driver.latestStopReason);
             const showStoppedAt = isInactive;
-            const stopCounterSummary = driver.stopReasonCounters
-              .map((item) => `${item.label} ${item.count}회`)
-              .join("  ");
+            const stopCounterSummary = driver.stopReasonCounters.map((item) => `${item.label} ${item.count}회`).join("  ");
 
             return (
               <View key={driver.driverKey} style={styles.driverCard}>
@@ -105,6 +153,7 @@ export default function WorkTimeScreen() {
                       <Text style={styles.rankText}>{rankLabel(index, drivers.length)}</Text>
                     </View>
                   </View>
+
                   <View style={styles.workedValueRow}>
                     {driver.adjustmentDeltaLabel ? (
                       <Text
@@ -126,9 +175,7 @@ export default function WorkTimeScreen() {
                     {stateLabel(driver.latestState)}
                     {showReason ? <Text style={styles.reasonText}> {driver.latestStopReason}</Text> : null}
                   </Text>
-                  <Text style={styles.summaryText}>
-                    세그먼트 {driver.segments + (driver.currentSegmentStartedAt ? 1 : 0)}회
-                  </Text>
+                  <Text style={styles.summaryText}>세그먼트 {driver.segments + (driver.currentSegmentStartedAt ? 1 : 0)}개</Text>
                 </View>
 
                 <View style={styles.timeStack}>
@@ -139,6 +186,7 @@ export default function WorkTimeScreen() {
                     </View>
                     <Text style={styles.timeValue}>{formatDateTime(driver.firstSeenAt)}</Text>
                   </View>
+
                   {showStoppedAt ? (
                     <View style={styles.timeBlock}>
                       <Text style={styles.timeLabel}>운전 중지</Text>
@@ -156,6 +204,13 @@ export default function WorkTimeScreen() {
 }
 
 function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
+  const rulesCardBackground = resolvedTheme === "dark" ? "#0d1117" : "#fbfcfe";
+  const rulesCardBorder = resolvedTheme === "dark" ? "#202833" : "#d8e0e8";
+  const rulesPrimaryText = resolvedTheme === "dark" ? "#f3f6fb" : "#18212b";
+  const rulesSecondaryText = resolvedTheme === "dark" ? "#c4ccd7" : "#425061";
+  const rulesMutedText = resolvedTheme === "dark" ? "#919cab" : "#64748b";
+  const rulesShadow = resolvedTheme === "dark" ? 0.26 : 0.12;
+
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.screenBackground },
     content: { padding: 16, gap: 14, paddingBottom: 28 },
@@ -168,37 +223,102 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], re
       borderRadius: 12,
       fontWeight: "700",
     },
-    heroCard: {
-      backgroundColor: colors.surfaceBackground,
-      borderRadius: 16,
+    rulesCard: {
+      position: "relative",
+      backgroundColor: rulesCardBackground,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: colors.border,
-      padding: 16,
+      borderColor: rulesCardBorder,
+      paddingHorizontal: 18,
+      paddingVertical: 18,
+      shadowColor: "#000000",
+      shadowOpacity: rulesShadow,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 4,
+    },
+    statusDock: {
+      position: "absolute",
+      top: 18,
+      right: 18,
+      width: 72,
+      alignItems: "center",
+      justifyContent: "flex-start",
+    },
+    statusCircle: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: "#2c7fe3",
+      shadowColor: "#2c7fe3",
+      shadowOpacity: 0.28,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 3,
+    },
+    statusTriangle: {
+      width: 0,
+      height: 0,
+      borderLeftWidth: 28,
+      borderRightWidth: 28,
+      borderBottomWidth: 50,
+      borderLeftColor: "transparent",
+      borderRightColor: "transparent",
+      borderBottomColor: "#e25757",
+      marginTop: 2,
+    },
+    statusSquare: {
+      width: 48,
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: resolvedTheme === "dark" ? "#657182" : "#a7b2bf",
+    },
+    rulesBody: {
+      paddingRight: 88,
+      gap: 18,
+    },
+    rulesTitle: {
+      fontSize: 18,
+      lineHeight: 24,
+      fontWeight: "800",
+      color: rulesPrimaryText,
+    },
+    rulesSection: {
+      gap: 12,
+    },
+    rulesSectionTitle: {
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: "800",
+      color: rulesPrimaryText,
+    },
+    rulesRow: {
+      flexDirection: "row",
+      alignItems: "center",
       gap: 8,
+      minHeight: 20,
     },
-    heroTitle: { fontSize: 22, fontWeight: "800", color: colors.primaryText },
-    heroText: { fontSize: 14, lineHeight: 20, color: colors.secondaryText },
-    heroMeta: { fontSize: 13, color: colors.secondaryText },
-    sessionCard: {
-      backgroundColor: colors.surfaceBackground,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: 16,
-      gap: 6,
+    rulesMarker: {
+      width: 12,
+      fontSize: 16,
+      lineHeight: 18,
+      color: rulesMutedText,
+      textAlign: "center",
     },
-    sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
-    emptyCard: {
-      backgroundColor: colors.surfaceBackground,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: 16,
-      gap: 6,
+    rulesIcon: {
+      width: 24,
+      fontSize: 16,
+      lineHeight: 18,
+      color: rulesPrimaryText,
+      textAlign: "center",
     },
-    emptyTitle: { fontSize: 17, fontWeight: "800", color: colors.primaryText },
-    emptyText: { fontSize: 13, lineHeight: 18, color: colors.secondaryText },
-    meta: { fontSize: 13, color: colors.secondaryText },
+    rulesItemText: {
+      flex: 1,
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: "700",
+      color: rulesSecondaryText,
+    },
     listCard: {
       backgroundColor: colors.surfaceBackground,
       borderRadius: 16,
@@ -207,6 +327,8 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], re
       padding: 16,
       gap: 10,
     },
+    sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
+    emptyText: { fontSize: 13, lineHeight: 18, color: colors.secondaryText },
     driverCard: {
       borderRadius: 14,
       borderWidth: 1,

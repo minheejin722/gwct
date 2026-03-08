@@ -374,8 +374,9 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const [config, latest] = await Promise.all([loadMonitorSettings(), loadScheduleFocusSnapshot()]);
     const trackingCount = config.gwctEtaMonitor.trackingCount;
     return {
-      ...config.gwctEtaMonitor,
-      latestCapturedAt: latest?.capturedAt || null,
+      enabled: config.gwctEtaMonitor.enabled,
+      trackingCount,
+      lastChangedAt: config.gwctEtaMonitor.lastChangedAt,
       preview: latest?.items.slice(0, trackingCount) || [],
     };
   });
@@ -388,7 +389,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const saved = await saveMonitorSettings({
       gwctEtaMonitor: parsed.data,
     });
-    return saved.gwctEtaMonitor;
+    return {
+      enabled: saved.gwctEtaMonitor.enabled,
+      trackingCount: saved.gwctEtaMonitor.trackingCount,
+      lastChangedAt: saved.gwctEtaMonitor.lastChangedAt,
+    };
   });
 
   app.get("/api/monitors/gc-remaining", async () => {

@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 
 interface GcRemainingMonitorResponse {
@@ -48,6 +49,8 @@ async function saveGcRule(gc: number, payload: { enabled?: boolean; threshold?: 
 }
 
 export default function MonitorGcRemainingScreen() {
+  const { colors, resolvedTheme } = useAppPreferences();
+  const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<GcRemainingMonitorResponse>(API_URLS.monitorGcRemaining, {
     pollMs: 25000,
   });
@@ -128,7 +131,14 @@ export default function MonitorGcRemainingScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={loading}
+          onRefresh={() => void refresh()}
+          tintColor={colors.accentMuted}
+          colors={[colors.badgeBackground]}
+        />
+      }
     >
       {error ? <Text style={styles.error}>Server connection failed, retrying...</Text> : null}
       <View style={styles.headerCard}>
@@ -144,9 +154,12 @@ export default function MonitorGcRemainingScreen() {
         return (
           <View key={gc} style={styles.card}>
             <Text style={styles.gcTitle}>GC{gc}</Text>
-            <Text style={styles.meta}>Status: {monitor.enabled ? "ACTIVE" : "INACTIVE"}</Text>
+            <Text style={[styles.meta, monitor.enabled ? styles.statusActive : styles.statusInactive]}>
+              Status: {monitor.enabled ? "ACTIVE" : "INACTIVE"}
+            </Text>
             <Text style={styles.meta}>
-              Latest subtotal {latest?.remainingSubtotal ?? "-"} (Discharge {latest?.dischargeRemaining ?? "-"} / Load {latest?.loadRemaining ?? "-"})
+              Latest subtotal {latest?.remainingSubtotal ?? "-"} (Discharge {latest?.dischargeRemaining ?? "-"} / Load{" "}
+              {latest?.loadRemaining ?? "-"})
             </Text>
 
             <View style={styles.stepRow}>
@@ -158,6 +171,7 @@ export default function MonitorGcRemainingScreen() {
                 value={thresholdInputs[key] ?? String(monitor.threshold)}
                 onChangeText={(text) => updateInput(gc, text)}
                 keyboardType="number-pad"
+                selectionColor={colors.badgeBackground}
               />
               <Pressable style={styles.stepButton} onPress={() => step(gc, 1)}>
                 <Text style={styles.stepText}>+</Text>
@@ -187,80 +201,88 @@ export default function MonitorGcRemainingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#eef4fb" },
-  content: { padding: 16, gap: 10 },
-  error: {
-    backgroundColor: "#fde8e8",
-    borderWidth: 1,
-    borderColor: "#e8a8a8",
-    color: "#8b1a1a",
-    padding: 10,
-    borderRadius: 10,
-    fontWeight: "700",
-  },
-  headerCard: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
-  },
-  title: { fontSize: 17, fontWeight: "800", color: "#123a5e" },
-  gcTitle: { fontSize: 16, fontWeight: "800", color: "#123a5e" },
-  meta: { fontSize: 12, color: "#315a7f" },
-  card: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d8e4f0",
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
-  stepRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  stepButton: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    borderColor: "#bfd3e7",
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f7fbff",
-  },
-  stepText: { fontSize: 18, fontWeight: "800", color: "#123a5e" },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#c4d5e7",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#f9fbff",
-    fontSize: 16,
-    fontWeight: "700",
-    textAlign: "center",
-    color: "#123a5e",
-  },
-  buttonRow: { flexDirection: "row", gap: 8 },
-  confirmButton: {
-    flex: 1,
-    backgroundColor: "#0f3b63",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  confirmText: { color: "#fff", fontWeight: "700" },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: "#f4f7fb",
-    borderWidth: 1,
-    borderColor: "#bfd3e7",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  cancelText: { color: "#123a5e", fontWeight: "700" },
-  disabled: { opacity: 0.6 },
-});
+function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], resolvedTheme: "light" | "dark") {
+  const inputBackground = resolvedTheme === "dark" ? "#1b2631" : "#f9fbff";
+  const stepBackground = resolvedTheme === "dark" ? "#1b2631" : "#f7fbff";
+  const confirmBackground = resolvedTheme === "dark" ? colors.badgeBackground : "#0f3b63";
+
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.screenBackground },
+    content: { padding: 16, gap: 10, paddingBottom: 28 },
+    error: {
+      backgroundColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.12)" : "#fde8e8",
+      borderWidth: 1,
+      borderColor: resolvedTheme === "dark" ? "rgba(255,122,122,0.26)" : "#e8a8a8",
+      color: colors.danger,
+      padding: 10,
+      borderRadius: 10,
+      fontWeight: "700",
+    },
+    headerCard: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 12,
+      gap: 4,
+    },
+    title: { fontSize: 17, fontWeight: "800", color: colors.primaryText },
+    gcTitle: { fontSize: 16, fontWeight: "800", color: colors.primaryText },
+    meta: { fontSize: 12, color: colors.secondaryText },
+    statusActive: { color: colors.success },
+    statusInactive: { color: colors.warning },
+    card: {
+      backgroundColor: colors.surfaceBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 12,
+      gap: 8,
+    },
+    stepRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    stepButton: {
+      width: 38,
+      height: 38,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: stepBackground,
+    },
+    stepText: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
+    input: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      backgroundColor: inputBackground,
+      fontSize: 16,
+      fontWeight: "700",
+      textAlign: "center",
+      color: colors.primaryText,
+    },
+    buttonRow: { flexDirection: "row", gap: 8 },
+    confirmButton: {
+      flex: 1,
+      backgroundColor: confirmBackground,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: "center",
+    },
+    confirmText: { color: "#ffffff", fontWeight: "700" },
+    cancelButton: {
+      flex: 1,
+      backgroundColor: colors.elevatedBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: "center",
+    },
+    cancelText: { color: colors.primaryText, fontWeight: "700" },
+    disabled: { opacity: 0.6 },
+  });
+}

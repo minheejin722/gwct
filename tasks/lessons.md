@@ -65,3 +65,21 @@
 
 ## 2026-03-08
 - When the user retracts newly added Work control UI and asks for fully implicit backend behavior, remove the control surface end-to-end (`state store`, `API`, `screen buttons/cards`) instead of keeping unused toggles or hidden fallback paths.
+- When the user replaces a Work hero/summary banner with a screenshot-specific rules card, remove the old banner blocks entirely and rebuild the top layout around the provided visual structure instead of trying to preserve both.
+- For Work status shapes, do not map the icon by broad state like `paused` when the operator gave a reason-specific legend. If only break windows should be triangles, key the shape off `reason === break_time` and send other non-collecting states to the square marker.
+- On compact Work cards, if an English title overruns a single line, shorten the wording before changing the layout when the user only asked to trim the label. Keep any requested emoji prefix intact.
+- For Work copy corrections, trim optional English qualifiers like `(OH) Operation` before touching spacing or typography when the user only wants the label shortened.
+- On the Work ranking card, if the user wants a cleaner header, remove auxiliary meta like `최근 반영 ...` and shorten the title literally instead of preserving the extra right-side label.
+- On monitor configuration screens, if a bottom raw-state list adds noise, replace it with a summary dashboard of key counts and exception pills instead of re-skinning the same verbose rows.
+- If the user also rejects that summary dashboard, do not keep a weaker replacement out of inertia. Remove the entire extra section and fold only the strongest metrics back into the remaining config cards.
+- On compact monitor setting cards, if the user asks to remove gray helper copy, delete the description rows entirely and tighten local spacing instead of replacing them with different secondary text.
+- For home summary widgets tied to a configured threshold, do not stop at a binary normal/low color rule if the user wants over-target feedback too. Treat the display as three states: below, equal, above.
+- For operations monitor settings screens, do not expose backend field names like `lastRawText` directly. Reframe them into operator-facing sections such as live status, stored memory, signal text, and action controls with clear hierarchy.
+- On status-first monitor screens, do not show the same concept twice in both hero stats and a separate snapshot card. If the hero already carries the current state, remove the duplicate card before trimming more details.
+- For ETA monitor preview screens, do not leave the watch-window rows as plain text lines. Present each row as a compact card with index, voyage/vessel identity, ETA, and watch-tone badge so operators can scan the window faster.
+- For GWCT ETA monitoring, if the user asks for `Last change` instead of `Last capture`, do not reuse the scrape timestamp. Persist a separate observed-state timestamp that updates only when the current trackingCount-scoped watch-window signature actually changes.
+- In monitor setting cards, if stepper controls already communicate the applied value, remove redundant metric tiles like `Applied now` or `Available rows` instead of keeping duplicate numeric summaries.
+- For GWCT ETA monitor cards, if the user asks to remove the gray helper sentence under the control title, delete it outright and tighten the title-block spacing instead of rewriting the helper copy.
+- On home summary widgets, keep icons semantically aligned with the row meaning. If the row is about yard equipment login rather than general trucks, prefer a forklift-style icon over a generic truck.
+- When swapping icons in Expo vector-icons, verify the target glyph exists in the exact icon family shipped by the app. `FontAwesome5 Free` and `Pro` do not expose the same names, so unsupported glyphs can render as `?`.
+- For operational status screens, do not stop after redesigning only the newer monitor pages. If a screen still carries hard-coded light backgrounds, borders, or control fills, convert it to `useAppPreferences()` so dark mode is complete across the whole operations surface.
