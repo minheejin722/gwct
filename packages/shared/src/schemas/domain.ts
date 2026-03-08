@@ -153,12 +153,6 @@ export type YTUnitTransitionKind = z.infer<typeof YTUnitTransitionKindSchema>;
 export const YTWorkShiftModeSchema = z.enum(["day", "night"]);
 export type YTWorkShiftMode = z.infer<typeof YTWorkShiftModeSchema>;
 
-export const YTWorkAutoModeSchema = z.enum(["off", "full_auto", "reserve_day", "reserve_night"]);
-export type YTWorkAutoMode = z.infer<typeof YTWorkAutoModeSchema>;
-
-export const YTWorkAutomationStatusSchema = z.enum(["off", "armed", "running"]);
-export type YTWorkAutomationStatus = z.infer<typeof YTWorkAutomationStatusSchema>;
-
 export const YTWorkSessionStatusSchema = z.enum(["active", "completed"]);
 export type YTWorkSessionStatus = z.infer<typeof YTWorkSessionStatusSchema>;
 
@@ -223,18 +217,8 @@ export const YTWorkSessionSchema = z.object({
 });
 export type YTWorkSession = z.infer<typeof YTWorkSessionSchema>;
 
-export const YTWorkAutomationStateSchema = z.object({
-  mode: YTWorkAutoModeSchema,
-  status: YTWorkAutomationStatusSchema,
-  armedAt: z.string().nullable(),
-  nextStartAt: z.string().nullable(),
-  nextMode: YTWorkShiftModeSchema.nullable(),
-});
-export type YTWorkAutomationState = z.infer<typeof YTWorkAutomationStateSchema>;
-
 export const YTWorkSessionResponseSchema = z.object({
   session: YTWorkSessionSchema.nullable(),
-  automation: YTWorkAutomationStateSchema,
   latestYtCapturedAt: z.string().nullable(),
   hasLiveSnapshot: z.boolean(),
 });

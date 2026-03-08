@@ -1,13 +1,11 @@
 ﻿import { describe, expect, it } from "vitest";
-import type { YTUnitSnapshot, YTSemanticState, YTWorkAutoMode } from "@gwct/shared";
+import type { YTUnitSnapshot, YTSemanticState } from "@gwct/shared";
 import {
   applyYtWorkSnapshot,
-  materializeYtWorkAutomationState,
   materializeYtWorkSession,
   reconcileYtWorkSnapshotState,
   startYtWorkSessionState,
 } from "../src/services/ytWorkTime/service.js";
-import type { StoredYtWorkAutomation } from "../src/services/ytWorkTime/automationStore.js";
 
 function unit(
   ytNo: string,
@@ -23,15 +21,6 @@ function unit(
     stopReason,
     semanticState,
     fingerprint: `${ytNo}:${driverName || "-"}:${semanticState}:${stopReason || "-"}`,
-  };
-}
-
-function automation(mode: YTWorkAutoMode, armedAt: string | null): StoredYtWorkAutomation {
-  return {
-    version: 1,
-    mode,
-    armedAt,
-    updatedAt: armedAt,
   };
 }
 
@@ -239,115 +228,50 @@ describe("YT work-time session rules", () => {
     expect(kim?.totalWorkedMinutes).toBe(30);
   });
 
-  it("rejects starting a shift outside the selected time window", () => {
-    expect(() => {
-      startYtWorkSessionState("day", "2026-03-07T12:00:00.000Z", [unit("YT23", "Hong", "active")]); // 21:00 KST
-    }).toThrow("주간근무 카운팅은 06:45~18:45 사이에만 시작할 수 있습니다.");
-
-    expect(() => {
-      startYtWorkSessionState("night", "2026-03-07T03:00:00.000Z", [unit("YT23", "Hong", "active")]); // 12:00 KST
-    }).toThrow("야간근무 카운팅은 18:45~06:45 사이에만 시작할 수 있습니다.");
-  });
-
-  it("keeps full auto running across day, night, and next day transitions", () => {
-    let state = reconcileYtWorkSnapshotState(
+  it("starts the current shift automatically from the first snapshot without any manual trigger", () => {
+    const session = reconcileYtWorkSnapshotState(
       null,
-      automation("full_auto", "2026-03-07T00:30:00.000Z"),
       [unit("YT23", "Hong", "active")],
       "2026-03-07T01:00:00.000Z",
     );
 
-    expect(state.automation.mode).toBe("full_auto");
-    expect(state.session?.mode).toBe("day");
-    expect(state.session?.startedAt).toBe("2026-03-07T01:00:00.000Z");
-    expect(state.session?.shiftWindowStartedAt).toBe("2026-03-06T21:45:00.000Z");
+    expect(session?.mode).toBe("day");
+    expect(session?.shiftWindowStartedAt).toBe("2026-03-06T21:45:00.000Z");
+    expect(session?.startedAt).toBe("2026-03-07T01:00:00.000Z");
+  });
 
-    state = reconcileYtWorkSnapshotState(
-      state.session,
-      state.automation,
+  it("rolls the stored session forward automatically when the shift boundary changes", () => {
+    let session = reconcileYtWorkSnapshotState(
+      null,
+      [unit("YT23", "Hong", "active")],
+      "2026-03-07T01:00:00.000Z",
+    );
+
+    session = reconcileYtWorkSnapshotState(
+      session,
       [unit("YT23", "Hong", "active")],
       "2026-03-07T09:50:00.000Z",
     );
 
-    expect(state.automation.mode).toBe("full_auto");
-    expect(state.session?.mode).toBe("night");
-    expect(state.session?.startedAt).toBe("2026-03-07T09:50:00.000Z");
-    expect(state.session?.shiftWindowStartedAt).toBe("2026-03-07T09:45:00.000Z");
-
-    state = reconcileYtWorkSnapshotState(
-      state.session,
-      state.automation,
-      [unit("YT23", "Hong", "active")],
-      "2026-03-07T21:50:00.000Z",
-    );
-
-    expect(state.automation.mode).toBe("full_auto");
-    expect(state.session?.mode).toBe("day");
-    expect(state.session?.startedAt).toBe("2026-03-07T21:50:00.000Z");
-    expect(state.session?.shiftWindowStartedAt).toBe("2026-03-07T21:45:00.000Z");
-
-    const autoView = materializeYtWorkAutomationState(
-      state.automation,
-      state.session || null,
-      "2026-03-07T21:50:00.000Z",
-    );
-    expect(autoView).toMatchObject({
-      mode: "full_auto",
-      status: "running",
-      nextStartAt: "2026-03-08T09:45:00.000Z",
-      nextMode: "night",
-    });
+    expect(session?.mode).toBe("night");
+    expect(session?.shiftWindowStartedAt).toBe("2026-03-07T09:45:00.000Z");
+    expect(session?.startedAt).toBe("2026-03-07T09:50:00.000Z");
   });
 
-  it("starts a reserved day shift once and clears the reservation", () => {
-    const state = reconcileYtWorkSnapshotState(
+  it("ignores stale older snapshots instead of overwriting a newer current-shift session", () => {
+    const current = reconcileYtWorkSnapshotState(
       null,
-      automation("reserve_day", "2026-03-06T20:00:00.000Z"),
       [unit("YT23", "Hong", "active")],
-      "2026-03-06T21:50:00.000Z",
+      "2026-03-07T09:50:00.000Z",
     );
 
-    expect(state.session?.mode).toBe("day");
-    expect(state.session?.startedAt).toBe("2026-03-06T21:50:00.000Z");
-    expect(state.session?.shiftWindowStartedAt).toBe("2026-03-06T21:45:00.000Z");
-    expect(state.automation.mode).toBe("off");
-    expect(state.automation.armedAt).toBeNull();
-  });
-
-  it("starts a reserved night shift once and clears the reservation", () => {
-    const state = reconcileYtWorkSnapshotState(
-      null,
-      automation("reserve_night", "2026-03-07T07:00:00.000Z"),
-      [unit("YT55", "Kim", "active")],
-      "2026-03-07T09:55:00.000Z",
+    const stale = reconcileYtWorkSnapshotState(
+      current,
+      [unit("YT23", null, "logged_out", "정비")],
+      "2026-03-07T09:40:00.000Z",
     );
 
-    expect(state.session?.mode).toBe("night");
-    expect(state.session?.startedAt).toBe("2026-03-07T09:55:00.000Z");
-    expect(state.session?.shiftWindowStartedAt).toBe("2026-03-07T09:45:00.000Z");
-    expect(state.automation.mode).toBe("off");
-  });
-
-  it("expires a one-shot reservation after the reserved shift window is missed", () => {
-    const first = reconcileYtWorkSnapshotState(
-      null,
-      automation("reserve_day", "2026-03-06T20:00:00.000Z"),
-      [unit("YT23", null, "logged_out")],
-      "2026-03-07T10:00:00.000Z",
-    );
-
-    expect(first.session).toBeNull();
-    expect(first.automation.mode).toBe("off");
-
-    const second = reconcileYtWorkSnapshotState(
-      first.session,
-      first.automation,
-      [unit("YT23", "Hong", "active")],
-      "2026-03-07T21:50:00.000Z",
-    );
-
-    expect(second.session).toBeNull();
-    expect(second.automation.mode).toBe("off");
+    expect(stale).toEqual(current);
   });
 });
 

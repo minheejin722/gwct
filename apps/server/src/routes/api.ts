@@ -3,8 +3,6 @@ import {
   DeviceRegistrationSchema,
   type AlertEvent,
   type SourceId,
-  YTWorkAutoModeSchema,
-  YTWorkShiftModeSchema,
 } from "@gwct/shared";
 import { z } from "zod";
 import { uid } from "../lib/id.js";
@@ -27,10 +25,7 @@ import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
 import {
   getYtWorkSessionView,
-  isYtWorkShiftWindowError,
   observeYtWorkSnapshot,
-  setYtWorkAutomationMode,
-  startYtWorkSession,
 } from "../services/ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services/yeosu/effectiveState.js";
 import { loadVesselEtaAdjustmentRecords } from "../services/vessels/etaAdjustmentStore.js";
@@ -105,14 +100,6 @@ const MonitorConfigInputSchema = z.object({
 
 const CleanupRunInputSchema = z.object({
   fullVacuum: z.boolean().optional(),
-});
-
-const StartYtWorkSessionInputSchema = z.object({
-  mode: YTWorkShiftModeSchema,
-});
-
-const UpdateYtWorkAutomationInputSchema = z.object({
-  mode: YTWorkAutoModeSchema,
 });
 
 function toLegacyGcThresholdPayload(settings: Awaited<ReturnType<typeof loadMonitorSettings>>) {
@@ -327,46 +314,6 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     if (latest) {
       await observeYtWorkSnapshot(latest.ytUnits, latest.capturedAt);
     }
-    return getYtWorkSessionView(new Date().toISOString(), latest?.capturedAt || null, Boolean(latest));
-  });
-
-  app.post("/api/yt/work-time/start", async (request, reply) => {
-    const parsed = StartYtWorkSessionInputSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.flatten() });
-    }
-
-    const latest = await loadEquipmentLatestSnapshot();
-    if (!latest) {
-      return reply.code(409).send({ error: "Latest YT snapshot is not available yet." });
-    }
-
-    try {
-      await setYtWorkAutomationMode("off", new Date().toISOString());
-      await startYtWorkSession(parsed.data.mode, new Date().toISOString(), latest.ytUnits);
-      return getYtWorkSessionView(new Date().toISOString(), latest.capturedAt, true);
-    } catch (error) {
-      if (isYtWorkShiftWindowError(error)) {
-        return reply.code(400).send({ error: (error as Error).message });
-      }
-      throw error;
-    }
-  });
-
-  app.post("/api/yt/work-time/automation", async (request, reply) => {
-    const parsed = UpdateYtWorkAutomationInputSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.flatten() });
-    }
-
-    const now = new Date().toISOString();
-    await setYtWorkAutomationMode(parsed.data.mode, now);
-
-    const latest = await loadEquipmentLatestSnapshot();
-    if (latest) {
-      await observeYtWorkSnapshot(latest.ytUnits, latest.capturedAt);
-    }
-
     return getYtWorkSessionView(new Date().toISOString(), latest?.capturedAt || null, Boolean(latest));
   });
 

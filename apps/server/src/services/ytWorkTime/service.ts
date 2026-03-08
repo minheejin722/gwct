@@ -1,7 +1,5 @@
 import type {
   YTUnitSnapshot,
-  YTWorkAutoMode,
-  YTWorkAutomationState,
   YTWorkDriverSummary,
   YTWorkStopReasonCounter,
   YTWorkStopReasonCounterKind,
@@ -12,12 +10,6 @@ import type {
   YTWorkShiftMode,
   YTSemanticState,
 } from "@gwct/shared";
-import {
-  defaultYtWorkAutomationState,
-  loadYtWorkAutomationState,
-  saveYtWorkAutomationState,
-  type StoredYtWorkAutomation,
-} from "./automationStore.js";
 import { loadYtWorkTimeRawState, saveYtWorkTimeRawState } from "./store.js";
 
 const KST_TIMEZONE = "Asia/Seoul";
@@ -25,9 +17,6 @@ const KST_OFFSET = "+09:00";
 const DAY_SHIFT_START = { hour: 6, minute: 45 } as const;
 const DAY_SHIFT_END = { hour: 18, minute: 45 } as const;
 const NIGHT_SHIFT_START = DAY_SHIFT_END;
-const NIGHT_SHIFT_END = DAY_SHIFT_START;
-const DAY_SHIFT_WINDOW_LABEL = "06:45~18:45";
-const NIGHT_SHIFT_WINDOW_LABEL = "18:45~06:45";
 
 type TrackedStopReasonRule = {
   kind: YTWorkStopReasonCounterKind;
@@ -100,8 +89,6 @@ interface ShiftWindow {
   endsAt: string;
   breaks: YTWorkSessionBreak[];
 }
-
-class ShiftWindowError extends Error {}
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -243,37 +230,6 @@ function getShiftWindowForObservedAt(observedAt: string): ShiftWindow | null {
   return buildShiftWindowFromStart("night", nightStart);
 }
 
-function getFirstShiftStartAtOrAfter(mode: YTWorkShiftMode, referenceAt: string): string | null {
-  const referenceDate = new Date(referenceAt);
-  if (!isValidDate(referenceDate)) {
-    return null;
-  }
-
-  const sameDayCandidate =
-    mode === "day"
-      ? dayShiftStartFor(referenceDate)
-      : nightShiftStartFor(referenceDate);
-
-  if (sameDayCandidate.getTime() >= referenceDate.getTime()) {
-    return sameDayCandidate.toISOString();
-  }
-
-  const nextDay = addDays(referenceDate, 1);
-  const nextCandidate =
-    mode === "day"
-      ? dayShiftStartFor(nextDay)
-      : nightShiftStartFor(nextDay);
-  return nextCandidate.toISOString();
-}
-
-function buildReservedShiftWindow(mode: YTWorkShiftMode, armedAt: string | null): ShiftWindow | null {
-  const targetStartAt = getFirstShiftStartAtOrAfter(mode, armedAt || new Date().toISOString());
-  if (!targetStartAt) {
-    return null;
-  }
-  return buildShiftWindowFromStart(mode, new Date(targetStartAt));
-}
-
 function isSessionActiveForWindow(session: StoredYtWorkSession | null, shiftWindow: ShiftWindow | null): boolean {
   if (!session || !shiftWindow || session.status !== "active") {
     return false;
@@ -283,13 +239,6 @@ function isSessionActiveForWindow(session: StoredYtWorkSession | null, shiftWind
     session.shiftWindowStartedAt === shiftWindow.shiftWindowStartedAt &&
     session.endsAt === shiftWindow.endsAt
   );
-}
-
-function buildAutomationOffState(updatedAt: string | null = null): StoredYtWorkAutomation {
-  return {
-    ...defaultYtWorkAutomationState(),
-    updatedAt,
-  };
 }
 
 function normalizeDriverName(value: string | null | undefined): string | null {
@@ -442,19 +391,31 @@ function effectiveWorkedMs(startAt: string, endAt: string, breaks: YTWorkSession
   return Math.max(0, total);
 }
 
-function buildShiftWindow(mode: YTWorkShiftMode, now: Date): ShiftWindow {
-  const shiftWindow = getShiftWindowForObservedAt(now.toISOString());
-  if (!shiftWindow) {
-    throw new ShiftWindowError("유효하지 않은 시각입니다.");
-  }
+function buildWorkSessionState(
+  shiftWindow: ShiftWindow,
+  observedAt: string,
+  units: YTUnitSnapshot[],
+): StoredYtWorkSession {
+  const drivers = Object.fromEntries(
+    sortByYtNoThenName(units)
+      .map((unit) => seedDriverEntry(unit, observedAt))
+      .filter((entry): entry is StoredYtWorkDriver => Boolean(entry))
+      .map((entry) => [entry.driverKey, entry]),
+  );
 
-  if (shiftWindow.mode !== mode) {
-    const label = mode === "day" ? DAY_SHIFT_WINDOW_LABEL : NIGHT_SHIFT_WINDOW_LABEL;
-    const modeLabel = mode === "day" ? "주간근무" : "야간근무";
-    throw new ShiftWindowError(`${modeLabel} 카운팅은 ${label} 사이에만 시작할 수 있습니다.`);
-  }
-
-  return shiftWindow;
+  return {
+    version: 1,
+    mode: shiftWindow.mode,
+    status: "active",
+    shiftWindowStartedAt: shiftWindow.shiftWindowStartedAt,
+    startedAt: observedAt,
+    endsAt: shiftWindow.endsAt,
+    completedAt: null,
+    observedAt,
+    timezone: KST_TIMEZONE,
+    breaks: shiftWindow.breaks,
+    drivers,
+  };
 }
 
 function seedDriverEntry(unit: YTUnitSnapshot, observedAt: string): StoredYtWorkDriver | null {
@@ -564,27 +525,11 @@ export function startYtWorkSessionState(
   observedAt: string,
   units: YTUnitSnapshot[],
 ): StoredYtWorkSession {
-  const shiftWindow = buildShiftWindow(mode, new Date(observedAt));
-  const drivers = Object.fromEntries(
-    sortByYtNoThenName(units)
-      .map((unit) => seedDriverEntry(unit, observedAt))
-      .filter((entry): entry is StoredYtWorkDriver => Boolean(entry))
-      .map((entry) => [entry.driverKey, entry]),
-  );
-
-  return {
-    version: 1,
-    mode,
-    status: "active",
-    shiftWindowStartedAt: shiftWindow.shiftWindowStartedAt,
-    startedAt: observedAt,
-    endsAt: shiftWindow.endsAt,
-    completedAt: null,
-    observedAt,
-    timezone: KST_TIMEZONE,
-    breaks: shiftWindow.breaks,
-    drivers,
-  };
+  const shiftWindow = getShiftWindowForObservedAt(observedAt);
+  if (!shiftWindow || shiftWindow.mode !== mode) {
+    throw new Error(`Observed time does not match ${mode} shift window.`);
+  }
+  return buildWorkSessionState(shiftWindow, observedAt, units);
 }
 
 export function applyYtWorkSnapshot(
@@ -763,174 +708,27 @@ export function materializeYtWorkSession(
   };
 }
 
-function reservedModeToShiftMode(mode: YTWorkAutoMode): YTWorkShiftMode | null {
-  if (mode === "reserve_day") {
-    return "day";
-  }
-  if (mode === "reserve_night") {
-    return "night";
-  }
-  return null;
-}
-
-function expireYtWorkAutomationState(
-  automation: StoredYtWorkAutomation,
-  asOf: string,
-): StoredYtWorkAutomation {
-  const reservedShiftMode = reservedModeToShiftMode(automation.mode);
-  if (!reservedShiftMode || !automation.armedAt) {
-    return automation;
-  }
-
-  const reservedWindow = buildReservedShiftWindow(reservedShiftMode, automation.armedAt);
-  if (!reservedWindow) {
-    return buildAutomationOffState(asOf);
-  }
-
-  if (compareIsoTimes(asOf, reservedWindow.endsAt) >= 0) {
-    return buildAutomationOffState(asOf);
-  }
-
-  return automation;
-}
-
 export function reconcileYtWorkSnapshotState(
   session: StoredYtWorkSession | null,
-  automation: StoredYtWorkAutomation,
   units: YTUnitSnapshot[],
   observedAt: string,
-): {
-  session: StoredYtWorkSession | null;
-  automation: StoredYtWorkAutomation;
-} {
-  const nextAutomation = expireYtWorkAutomationState(automation, observedAt);
-  const nextSession = session ? applyYtWorkSnapshot(session, units, observedAt) : null;
+): StoredYtWorkSession | null {
   const currentWindow = getShiftWindowForObservedAt(observedAt);
-  if (!currentWindow || nextAutomation.mode === "off") {
-    return {
-      session: nextSession,
-      automation: nextAutomation,
-    };
+  const currentSession = session ? finalizeIfExpired(session, observedAt) : null;
+
+  if (currentSession && compareIsoTimes(observedAt, currentSession.observedAt) <= 0) {
+    return currentSession;
   }
 
-  if (nextAutomation.mode === "full_auto") {
-    if (isSessionActiveForWindow(nextSession, currentWindow)) {
-      return {
-        session: nextSession,
-        automation: nextAutomation,
-      };
-    }
-
-    return {
-      session: startYtWorkSessionState(currentWindow.mode, observedAt, units),
-      automation: nextAutomation,
-    };
+  if (!currentWindow) {
+    return currentSession;
   }
 
-  const reservedShiftMode = reservedModeToShiftMode(nextAutomation.mode);
-  const reservedWindow = reservedShiftMode && nextAutomation.armedAt
-    ? buildReservedShiftWindow(reservedShiftMode, nextAutomation.armedAt)
-    : null;
-
-  if (!reservedShiftMode || !reservedWindow) {
-    return {
-      session: nextSession,
-      automation: buildAutomationOffState(observedAt),
-    };
+  if (currentSession && isSessionActiveForWindow(currentSession, currentWindow)) {
+    return applyYtWorkSnapshot(currentSession, units, observedAt);
   }
 
-  if (compareIsoTimes(observedAt, reservedWindow.shiftWindowStartedAt) < 0) {
-    return {
-      session: nextSession,
-      automation: nextAutomation,
-    };
-  }
-
-  if (compareIsoTimes(observedAt, reservedWindow.endsAt) >= 0) {
-    return {
-      session: nextSession,
-      automation: buildAutomationOffState(observedAt),
-    };
-  }
-
-  return {
-    session: isSessionActiveForWindow(nextSession, reservedWindow)
-      ? nextSession
-      : startYtWorkSessionState(reservedShiftMode, observedAt, units),
-    automation: buildAutomationOffState(observedAt),
-  };
-}
-
-export function materializeYtWorkAutomationState(
-  automation: StoredYtWorkAutomation,
-  session: StoredYtWorkSession | null,
-  asOf: string,
-): YTWorkAutomationState {
-  const activeSession = session ? finalizeIfExpired(session, asOf) : null;
-  if (automation.mode === "off") {
-    return {
-      mode: "off",
-      status: "off",
-      armedAt: null,
-      nextStartAt: null,
-      nextMode: null,
-    };
-  }
-
-  if (automation.mode === "full_auto") {
-    const currentWindow = getShiftWindowForObservedAt(asOf);
-    if (!currentWindow) {
-      return {
-        mode: automation.mode,
-        status: "armed",
-        armedAt: automation.armedAt,
-        nextStartAt: null,
-        nextMode: null,
-      };
-    }
-
-    const isRunning = isSessionActiveForWindow(activeSession, currentWindow);
-    return {
-      mode: automation.mode,
-      status: isRunning ? "running" : "armed",
-      armedAt: automation.armedAt,
-      nextStartAt: isRunning ? currentWindow.endsAt : currentWindow.shiftWindowStartedAt,
-      nextMode: isRunning ? (currentWindow.mode === "day" ? "night" : "day") : currentWindow.mode,
-    };
-  }
-
-  const reservedShiftMode = reservedModeToShiftMode(automation.mode);
-  const reservedWindow = reservedShiftMode && automation.armedAt
-    ? buildReservedShiftWindow(reservedShiftMode, automation.armedAt)
-    : null;
-
-  return {
-    mode: automation.mode,
-    status:
-      reservedWindow && isSessionActiveForWindow(activeSession, reservedWindow)
-        ? "running"
-        : "armed",
-    armedAt: automation.armedAt,
-    nextStartAt: reservedWindow?.shiftWindowStartedAt || null,
-    nextMode: reservedShiftMode,
-  };
-}
-
-export async function setYtWorkAutomationMode(
-  mode: YTWorkAutoMode,
-  updatedAt: string,
-): Promise<StoredYtWorkAutomation> {
-  const next =
-    mode === "off"
-      ? buildAutomationOffState(updatedAt)
-      : {
-          version: 1 as const,
-          mode,
-          armedAt: updatedAt,
-          updatedAt,
-        };
-  await saveYtWorkAutomationState(next);
-  return next;
+  return buildWorkSessionState(currentWindow, observedAt, units);
 }
 
 export async function loadYtWorkSessionState(): Promise<StoredYtWorkSession | null> {
@@ -941,36 +739,13 @@ export async function saveYtWorkSessionState(session: StoredYtWorkSession): Prom
   await saveYtWorkTimeRawState(session);
 }
 
-export async function startYtWorkSession(
-  mode: YTWorkShiftMode,
-  observedAt: string,
-  units: YTUnitSnapshot[],
-): Promise<YTWorkSession> {
-  const session = startYtWorkSessionState(mode, observedAt, units);
-  await saveYtWorkSessionState(session);
-  return materializeYtWorkSession(session, observedAt)!;
-}
-
 export async function observeYtWorkSnapshot(units: YTUnitSnapshot[], observedAt: string): Promise<void> {
-  const [currentSession, currentAutomation] = await Promise.all([
-    loadYtWorkSessionState(),
-    loadYtWorkAutomationState(),
-  ]);
-  const next = reconcileYtWorkSnapshotState(currentSession, currentAutomation, units, observedAt);
-
-  const sessionChanged = JSON.stringify(currentSession) !== JSON.stringify(next.session);
-  const automationChanged = JSON.stringify(currentAutomation) !== JSON.stringify(next.automation);
-
-  if (!sessionChanged && !automationChanged) {
+  const currentSession = await loadYtWorkSessionState();
+  const nextSession = reconcileYtWorkSnapshotState(currentSession, units, observedAt);
+  if (!nextSession || JSON.stringify(currentSession) === JSON.stringify(nextSession)) {
     return;
   }
-
-  if (sessionChanged && next.session) {
-    await saveYtWorkSessionState(next.session);
-  }
-  if (automationChanged) {
-    await saveYtWorkAutomationState(next.automation);
-  }
+  await saveYtWorkSessionState(nextSession);
 }
 
 export async function getYtWorkSessionView(
@@ -978,28 +753,16 @@ export async function getYtWorkSessionView(
   latestYtCapturedAt: string | null,
   hasLiveSnapshot: boolean,
 ): Promise<YTWorkSessionResponse> {
-  const [currentSession, currentAutomation] = await Promise.all([
-    loadYtWorkSessionState(),
-    loadYtWorkAutomationState(),
-  ]);
+  const currentSession = await loadYtWorkSessionState();
   const finalizedSession = currentSession ? finalizeIfExpired(currentSession, asOf) : null;
-  const finalizedAutomation = expireYtWorkAutomationState(currentAutomation, asOf);
 
   if (currentSession && finalizedSession && JSON.stringify(currentSession) !== JSON.stringify(finalizedSession)) {
     await saveYtWorkSessionState(finalizedSession);
   }
-  if (JSON.stringify(currentAutomation) !== JSON.stringify(finalizedAutomation)) {
-    await saveYtWorkAutomationState(finalizedAutomation);
-  }
 
   return {
     session: materializeYtWorkSession(finalizedSession, asOf),
-    automation: materializeYtWorkAutomationState(finalizedAutomation, finalizedSession, asOf),
     latestYtCapturedAt,
     hasLiveSnapshot,
   };
-}
-
-export function isYtWorkShiftWindowError(error: unknown): boolean {
-  return error instanceof ShiftWindowError;
 }

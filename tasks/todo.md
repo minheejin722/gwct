@@ -1862,51 +1862,41 @@
     - `activeVesselName = MAERSK SALTORO`
     - `pendingVesselNames = [CMA CGM CORTE REAL]`
 
-## Work Auto Count Modes Plan (2026-03-08)
-- [x] Reconfirm the current Work session storage, API responses, monitor loop integration point, and append this implementation/review block before coding.
-- [x] Add persisted Work automation state with the three user-facing modes (`24시간 주야`, `주간 예약`, `야간 예약`) while keeping the existing session store separate.
-- [x] Implement server-side auto reconciliation for session start/end, manual-start override, and the new `POST /api/yt/work-time/automation` flow.
-- [x] Extend shared types and `GET/POST /api/yt/work-time*` responses to expose automation state and next auto start metadata.
-- [x] Update the mobile `Work` screen to add the `Auto Count` card without disrupting the current card hierarchy or manual `Shift Start` flow.
-- [x] Add focused service/API regression coverage, run relevant tests/typecheck, and document the review.
+## Work Always-On Shift Count Plan (2026-03-08)
+- [x] Reconfirm the current Work session storage, monitor loop integration point, and remove the no-longer-wanted control-surface work from the prior implementation.
+- [x] Refactor backend Work accumulation to be always-on by current shift window (`06:45~18:45`, `18:45~06:45`) with fixed lunch/midnight break exclusions.
+- [x] Remove manual/automation Work endpoints and any persisted automation state no longer needed.
+- [x] Simplify the mobile `Work` screen so it only presents current automatic shift info and the existing ranking cards.
+- [x] Update focused service/API regression coverage, run verification, and document the revised review.
 
-## Work Auto Count Modes Review
+## Work Always-On Shift Count Review
 - Root cause:
-  - The Work feature only persisted a single manual session state, so counting started only after explicitly pressing `주간근무 시작` or `야간근무 시작`.
-  - There was no persisted automation mode, no route for configuring it, and no server-side reconcile path that could open the correct shift on the first `gwct_equipment_status` snapshot after `06:45` or `18:45`.
+  - The user no longer wanted any `Work` controls. The previous implementation had introduced manual/auto configuration surface, extra state, and extra endpoints that no longer matched the actual product intent.
 - Implementation:
-  - Added shared Work automation types in `packages/shared/src/schemas/domain.ts`:
-    - `YTWorkAutoMode`
-    - `YTWorkAutomationState`
-    - `YTWorkSessionResponse.automation`
-  - Added persisted automation store:
-    - `apps/server/src/services/ytWorkTime/automationStore.ts`
-    - JSON path: `apps/server/data/config/yt_work_time_automation.json`
-  - Extended `apps/server/src/services/ytWorkTime/service.ts`:
-    - added shift-window helpers for current/next reserved windows
-    - added pure `reconcileYtWorkSnapshotState(...)` for `full_auto`, `reserve_day`, `reserve_night`
-    - added reservation expiry handling and automation view materialization
-    - guarded against stale snapshots so older `capturedAt` values do not overwrite newer session state
-  - Updated `apps/server/src/routes/api.ts`:
-    - `GET /api/yt/work-time` now returns `automation`
-    - `POST /api/yt/work-time/start` clears automation before manual start
-    - added `POST /api/yt/work-time/automation`
-  - Updated `apps/mobile/app/(tabs)/worktime.tsx`:
-    - kept the existing card flow
-    - added a separate `Auto Count` card under `Shift Start`
-    - layout: one full-width `24시간 주야` tile, two half-width `주간 예약`/`야간 예약` tiles, and a small `자동 끔` pill
-    - added one-line status strip for current mode / next auto start / auto-running state
-    - when automation is active, manual start now shows a confirm alert before disabling automation and starting manually
-  - Added API config entry:
-    - `apps/mobile/lib/config.ts` -> `ytWorkTimeAutomation`
+  - Simplified `apps/server/src/services/ytWorkTime/service.ts` to a single always-on reconcile path:
+    - `reconcileYtWorkSnapshotState(...)` now derives the current shift from each `gwct_equipment_status` snapshot time
+    - if the stored session already matches the current shift, it continues accumulating
+    - if the shift boundary has passed, the next snapshot automatically rolls the stored session into the new shift
+    - lunch `12:00~13:00` and midnight `00:00~01:00` breaks remain excluded through the existing effective-worked-time calculation
+    - stale older snapshots are ignored so they do not overwrite a newer session
+  - Removed the discarded control/config surface:
+    - deleted `apps/server/src/services/ytWorkTime/automationStore.ts`
+    - removed Work automation types from `packages/shared/src/schemas/domain.ts`
+    - removed `POST /api/yt/work-time/start`
+    - removed `POST /api/yt/work-time/automation`
+    - removed unused mobile API config entries for those POST routes
+  - Simplified `apps/mobile/app/(tabs)/worktime.tsx`:
+    - removed `Shift Start`, `Auto Count`, pills, tiles, alerts, and related busy state
+    - kept the ranking cards intact
+    - kept only passive auto-shift summary text and current shift/session metadata
 - Tests added/updated:
   - `apps/server/tests/yt-work-time.test.ts`
-    - full-auto day/night/day rollover
-    - one-shot day/night reservation start + auto-clear
-    - missed reservation expiry without next-day repeat
+    - current shift auto-start from first snapshot
+    - automatic rollover at day/night boundary
+    - stale older snapshot ignore rule
   - `apps/server/tests/yt-work-time-api.test.ts`
-    - `POST /api/yt/work-time/automation` immediate reconcile + response shape
-    - manual `POST /api/yt/work-time/start` clears automation
+    - `GET /api/yt/work-time` auto-creates the current shift session from latest snapshot
+    - old `start` / `automation` POST routes are absent (`404`)
 - Verification:
   - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts` ✅
   - `npm.cmd run typecheck` ✅

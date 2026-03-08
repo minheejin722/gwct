@@ -62,3 +62,6 @@
 - For YT Count latest snapshots, store the first logout observation time separately from the raw `loginText`, preserve it across repeated `logged_out` polls, and clear it only when the same YT becomes active again. The mobile row should switch its third label between `로그인` and `로그아웃` instead of always reusing `로그인`.
 - For YT unit alerts, do not treat `logged_out -> active` as `다시 로그인` based on YT 번호 alone. Compare the last known driver identity too: same driver => `다시 로그인`, different same-company driver => `교대`, different company-prefix driver => `주야 교대`, and unknown prior driver => plain `로그인`.
 - For Work session shift rules, do not leave day/night boundaries duplicated as raw `07:00/19:00` literals across service logic and UI helper copy. Centralize the shift start/end constants in the backend and update the UI copy/tests in the same change whenever operations correct the boundary times.
+
+## 2026-03-08
+- When the user retracts newly added Work control UI and asks for fully implicit backend behavior, remove the control surface end-to-end (`state store`, `API`, `screen buttons/cards`) instead of keeping unused toggles or hidden fallback paths.
