@@ -152,7 +152,8 @@ export default function WeatherScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
   const { data, loading, refresh } = useEndpoint<WeatherResponse>(API_URLS.weather, {
-    pollMs: 30000,
+    pollMs: 10000,
+    liveSources: ["ys_forecast", "ys_notice", "ys_news"],
   });
 
   const primary = data?.primary || data?.forecast || null;

@@ -38,16 +38,16 @@ describe("monitor service ETA adjustment decoration", () => {
     const repo = {
       countGwctEtaAdjustments: vi.fn().mockResolvedValue(2),
     } as any;
-    const service = new MonitorService(repo, {} as any, {} as any, { info() {}, debug() {} } as any);
+    const service = new MonitorService(repo, {} as any, {} as any, { broadcast() {} } as any, { info() {}, debug() {} } as any);
 
     const prepared = await (service as any).decorateEtaAdjustmentEvent(
-      buildEtaEvent("종전보다 2시간 0분 더 늦게 입항 예정입니다."),
+      buildEtaEvent("종전보다 2시간 더 늦게 입항 예정입니다."),
     );
 
     expect(repo.countGwctEtaAdjustments).toHaveBeenCalledWith("SWSI-0002");
     expect(prepared.payload.adjustmentCount).toBe(3);
-    expect(prepared.payload.humanMessage).toBe("종전보다 2시간 0분 더 늦게 입항 예정입니다. 3번째 ETA 조정");
-    expect(prepared.message).toBe("SAWASDEE SIRIUS 종전보다 2시간 0분 더 늦게 입항 예정입니다. 3번째 ETA 조정");
+    expect(prepared.payload.humanMessage).toBe("종전보다 2시간 더 늦게 입항 예정입니다. 3번째 조정");
+    expect(prepared.message).toBe("SAWASDEE SIRIUS 종전보다 2시간 더 늦게 입항 예정입니다. 3번째 조정");
   });
 
   it("keeps first ETA change message unchanged", async () => {
@@ -56,13 +56,13 @@ describe("monitor service ETA adjustment decoration", () => {
     const repo = {
       countGwctEtaAdjustments: vi.fn().mockResolvedValue(0),
     } as any;
-    const service = new MonitorService(repo, {} as any, {} as any, { info() {}, debug() {} } as any);
+    const service = new MonitorService(repo, {} as any, {} as any, { broadcast() {} } as any, { info() {}, debug() {} } as any);
 
     const prepared = await (service as any).decorateEtaAdjustmentEvent(
-      buildEtaEvent("종전보다 0시간 45분 더 일찍 입항 예정입니다."),
+      buildEtaEvent("종전보다 45분 더 일찍 입항 예정입니다."),
     );
 
     expect(prepared.payload.adjustmentCount).toBe(1);
-    expect(prepared.payload.humanMessage).toBe("종전보다 0시간 45분 더 일찍 입항 예정입니다.");
+    expect(prepared.payload.humanMessage).toBe("종전보다 45분 더 일찍 입항 예정입니다.");
   });
 });

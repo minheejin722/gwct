@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,9 +8,11 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface GcRemainingMonitorResponse {
   monitors: Record<string, { enabled: boolean; threshold: number }>;
@@ -52,7 +53,8 @@ export default function MonitorGcRemainingScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<GcRemainingMonitorResponse>(API_URLS.monitorGcRemaining, {
-    pollMs: 25000,
+    pollMs: 5000,
+    liveSources: ["gwct_gc_remaining"],
   });
 
   const [thresholdInputs, setThresholdInputs] = useState<Record<string, string>>({});
@@ -81,7 +83,7 @@ export default function MonitorGcRemainingScreen() {
   const updateInput = (gc: number, text: string) => {
     setThresholdInputs((prev) => ({
       ...prev,
-      [String(gc)]: text,
+      [String(gc)]: sanitizeNumericInput(text),
     }));
   };
 
@@ -163,36 +165,40 @@ export default function MonitorGcRemainingScreen() {
             </Text>
 
             <View style={styles.stepRow}>
-              <Pressable style={styles.stepButton} onPress={() => step(gc, -1)}>
+              <TactilePressable style={styles.stepButton} variant="compact" onPress={() => step(gc, -1)}>
                 <Text style={styles.stepText}>-</Text>
-              </Pressable>
+              </TactilePressable>
               <TextInput
                 style={styles.input}
                 value={thresholdInputs[key] ?? String(monitor.threshold)}
                 onChangeText={(text) => updateInput(gc, text)}
-                keyboardType="number-pad"
+                keyboardType="default"
+                returnKeyType="search"
+                onSubmitEditing={() => void onConfirm(gc)}
+                autoCorrect={false}
+                spellCheck={false}
                 selectionColor={colors.badgeBackground}
               />
-              <Pressable style={styles.stepButton} onPress={() => step(gc, 1)}>
+              <TactilePressable style={styles.stepButton} variant="compact" onPress={() => step(gc, 1)}>
                 <Text style={styles.stepText}>+</Text>
-              </Pressable>
+              </TactilePressable>
             </View>
 
             <View style={styles.buttonRow}>
-              <Pressable
+              <TactilePressable
                 style={[styles.confirmButton, saving ? styles.disabled : null]}
                 onPress={() => void onConfirm(gc)}
                 disabled={saving}
               >
                 <Text style={styles.confirmText}>{saving ? "Saving..." : "Confirm"}</Text>
-              </Pressable>
-              <Pressable
+              </TactilePressable>
+              <TactilePressable
                 style={[styles.cancelButton, saving ? styles.disabled : null]}
                 onPress={() => void onCancel(gc)}
                 disabled={saving}
               >
                 <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
+              </TactilePressable>
             </View>
           </View>
         );

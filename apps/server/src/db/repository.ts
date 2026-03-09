@@ -336,6 +336,47 @@ export class Repository {
     }));
   }
 
+  async getEquipmentStatusSnapshotGroupsSince(source: SourceId, seenAtSince: string) {
+    const sinceDate = new Date(seenAtSince);
+    if (!Number.isFinite(sinceDate.getTime())) {
+      return [] as Array<{ seenAt: string; items: EquipmentLoginStatus[] }>;
+    }
+
+    const seenAtRows = await prisma.equipmentLoginStatus.findMany({
+      where: {
+        source,
+        seenAt: {
+          gte: sinceDate,
+        },
+      },
+      distinct: ["seenAt"],
+      orderBy: { seenAt: "asc" },
+      select: { seenAt: true },
+    });
+
+    const groups: Array<{ seenAt: string; items: EquipmentLoginStatus[] }> = [];
+    for (const entry of seenAtRows) {
+      const rows = await prisma.equipmentLoginStatus.findMany({
+        where: { source, seenAt: entry.seenAt },
+      });
+      groups.push({
+        seenAt: entry.seenAt.toISOString(),
+        items: rows.map((row) => ({
+          source: row.source as SourceId,
+          equipmentId: row.equipmentId,
+          operatorName: row.operatorName,
+          helperName: row.helperName,
+          loginText: row.loginText,
+          stopReason: row.stopReason,
+          signature: row.signature,
+          seenAt: row.seenAt.toISOString(),
+        })),
+      });
+    }
+
+    return groups;
+  }
+
   async saveYtSnapshot(snapshot: YTCountSnapshot | null) {
     if (!snapshot) {
       return;

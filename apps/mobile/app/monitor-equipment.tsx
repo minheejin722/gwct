@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,9 +8,11 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface EquipmentMonitorResponse {
   yt: {
@@ -79,7 +80,8 @@ export default function MonitorEquipmentScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<EquipmentMonitorResponse>(API_URLS.monitorEquipment, {
-    pollMs: 25000,
+    pollMs: 5000,
+    liveSources: ["gwct_equipment_status"],
   });
 
   const [ytInput, setYtInput] = useState("25");
@@ -118,7 +120,6 @@ export default function MonitorEquipmentScreen() {
         },
       });
       await refresh();
-      Alert.alert("Saved", "YT count monitor is now enabled.");
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -135,7 +136,6 @@ export default function MonitorEquipmentScreen() {
         },
       });
       await refresh();
-      Alert.alert("Disabled", "YT count monitor is now disabled.");
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -148,7 +148,6 @@ export default function MonitorEquipmentScreen() {
     try {
       await saveEquipmentConfig({ gcStaff: { enabled } });
       await refresh();
-      Alert.alert("Saved", `GC Cabin/Under monitor is now ${enabled ? "enabled" : "disabled"}.`);
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -209,30 +208,39 @@ export default function MonitorEquipmentScreen() {
         </View>
 
         <View style={styles.stepShell}>
-          <Pressable style={styles.stepButton} onPress={() => stepYt(-1)}>
+          <TactilePressable style={styles.stepButton} variant="compact" onPress={() => stepYt(-1)}>
             <Text style={styles.stepText}>-</Text>
-          </Pressable>
-          <TextInput style={styles.input} value={ytInput} onChangeText={setYtInput} keyboardType="number-pad" />
-          <Pressable style={styles.stepButton} onPress={() => stepYt(1)}>
+          </TactilePressable>
+          <TextInput
+            style={styles.input}
+            value={ytInput}
+            onChangeText={(text) => setYtInput(sanitizeNumericInput(text))}
+            keyboardType="default"
+            returnKeyType="search"
+            onSubmitEditing={() => void onConfirmYt()}
+            autoCorrect={false}
+            spellCheck={false}
+          />
+          <TactilePressable style={styles.stepButton} variant="compact" onPress={() => stepYt(1)}>
             <Text style={styles.stepText}>+</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
 
         <View style={styles.buttonRow}>
-          <Pressable
+          <TactilePressable
             style={[styles.confirmButton, savingYt ? styles.disabled : null]}
             onPress={() => void onConfirmYt()}
             disabled={savingYt}
           >
             <Text style={styles.confirmText}>{savingYt ? "Saving..." : "Confirm"}</Text>
-          </Pressable>
-          <Pressable
+          </TactilePressable>
+          <TactilePressable
             style={[styles.cancelButton, savingYt ? styles.disabled : null]}
             onPress={() => void onCancelYt()}
             disabled={savingYt}
           >
             <Text style={styles.cancelText}>Cancel</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
       </View>
 
@@ -271,20 +279,20 @@ export default function MonitorEquipmentScreen() {
         </View>
 
         <View style={styles.buttonRow}>
-          <Pressable
+          <TactilePressable
             style={[styles.confirmButton, savingGcStaff ? styles.disabled : null]}
             onPress={() => void setGcStaffEnabled(true)}
             disabled={savingGcStaff}
           >
             <Text style={styles.confirmText}>{savingGcStaff ? "Saving..." : "Confirm"}</Text>
-          </Pressable>
-          <Pressable
+          </TactilePressable>
+          <TactilePressable
             style={[styles.cancelButton, savingGcStaff ? styles.disabled : null]}
             onPress={() => void setGcStaffEnabled(false)}
             disabled={savingGcStaff}
           >
             <Text style={styles.cancelText}>Cancel</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
       </View>
     </ScrollView>

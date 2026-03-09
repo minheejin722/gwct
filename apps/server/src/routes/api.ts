@@ -3,6 +3,7 @@ import {
   DeviceRegistrationSchema,
   type AlertEvent,
   type SourceId,
+  type YTUnitSnapshot,
 } from "@gwct/shared";
 import { z } from "zod";
 import { uid } from "../lib/id.js";
@@ -24,18 +25,62 @@ import { buildGcCraneLiveRows } from "../services/gc/workState.js";
 import { loadScheduleFocusSnapshot } from "../services/scheduleFocus/latestStore.js";
 import { loadMonitorSettings, saveMonitorSettings, type MonitorSettingsInput } from "../services/monitorConfig/store.js";
 import {
+  getYtWorkShiftWindowForObservedAt,
   getYtWorkSessionView,
+  loadYtWorkSessionState,
   observeYtWorkSnapshot,
+  reconcileYtWorkSnapshotState,
+  saveYtWorkSessionState,
 } from "../services/ytWorkTime/service.js";
 import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services/yeosu/effectiveState.js";
 import { loadVesselEtaAdjustmentRecords } from "../services/vessels/etaAdjustmentStore.js";
 import { buildVesselLiveRows } from "../services/vessels/liveRows.js";
+import { buildYtUnitSnapshotFromEquipment } from "../services/equipment/ytUnits.js";
 
 interface RouteDeps {
   repo: Repository;
   monitorService: MonitorService;
   sseHub: SseHub;
   cleanupService: DataRetentionService;
+}
+
+async function recoverYtWorkSessionFromEquipmentHistory(repo: Repository, asOf: string): Promise<void> {
+  const shiftWindow = getYtWorkShiftWindowForObservedAt(asOf);
+  if (!shiftWindow) {
+    return;
+  }
+
+  const currentSession = await loadYtWorkSessionState();
+  const hasCurrentShiftSession =
+    Boolean(currentSession) &&
+    currentSession?.mode === shiftWindow.mode &&
+    currentSession?.shiftWindowStartedAt === shiftWindow.shiftWindowStartedAt &&
+    currentSession?.endsAt === shiftWindow.endsAt;
+  const currentDriverCount = currentSession ? Object.keys(currentSession.drivers || {}).length : 0;
+  if (hasCurrentShiftSession && currentDriverCount > 0) {
+    return;
+  }
+
+  const snapshotGroups = await repo.getEquipmentStatusSnapshotGroupsSince("gwct_equipment_status", shiftWindow.shiftWindowStartedAt);
+  if (!snapshotGroups.length) {
+    return;
+  }
+
+  let recoveredSession = null;
+  let previousUnits: YTUnitSnapshot[] = [];
+  for (const group of snapshotGroups) {
+    const units = buildYtUnitSnapshotFromEquipment(group.items, previousUnits, group.seenAt);
+    previousUnits = units;
+    recoveredSession = reconcileYtWorkSnapshotState(recoveredSession, units, group.seenAt);
+  }
+
+  if (!recoveredSession) {
+    return;
+  }
+
+  if (!currentSession || JSON.stringify(currentSession) !== JSON.stringify(recoveredSession)) {
+    await saveYtWorkSessionState(recoveredSession);
+  }
 }
 
 function requireDebugToken(request: FastifyRequest, reply: FastifyReply): boolean {
@@ -310,6 +355,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.get("/api/yt/work-time", async () => {
+    await recoverYtWorkSessionFromEquipmentHistory(deps.repo, new Date().toISOString());
     const latest = await loadEquipmentLatestSnapshot();
     if (latest) {
       await observeYtWorkSnapshot(latest.ytUnits, latest.capturedAt);

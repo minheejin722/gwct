@@ -1,5 +1,6 @@
 import { RefreshControl, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
-import { Link } from "expo-router";
+import { Link, useFocusEffect } from "expo-router";
+import { useCallback, useEffect } from "react";
 import { MaterialCommunityIcons, FontAwesome5, Feather } from "@expo/vector-icons";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { useSseAlerts } from "../../hooks/useSseAlerts";
@@ -23,9 +24,38 @@ interface YtMinimalResponse {
 export default function HomeScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
-  const { data, loading, refresh } = useEndpoint<SummaryResponse>(API_URLS.summary);
-  const { data: ytData } = useEndpoint<YtMinimalResponse>(API_URLS.yt);
-  const { connected, lastAlert } = useSseAlerts();
+  const { data, loading, refresh, setData } = useEndpoint<SummaryResponse>(API_URLS.summary, {
+    pollMs: 5000,
+    liveSources: ["gwct_schedule_list", "gwct_gc_remaining", "gwct_equipment_status", "ys_forecast", "ys_notice", "ys_news"],
+  });
+  const { data: ytData, refresh: refreshYt } = useEndpoint<YtMinimalResponse>(API_URLS.yt, {
+    pollMs: 5000,
+    liveSources: ["gwct_equipment_status"],
+  });
+  const { connected, eventsClearedAt, lastAlert } = useSseAlerts();
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh({ silent: true });
+      void refreshYt({ silent: true });
+    }, [refresh, refreshYt]),
+  );
+
+  useEffect(() => {
+    if (!eventsClearedAt) {
+      return;
+    }
+    setData((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      return {
+        ...previous,
+        alertCount24h: 0,
+        lastUpdatedAt: eventsClearedAt,
+      };
+    });
+  }, [eventsClearedAt, setData]);
 
   const threshold = ytData?.threshold ?? 0;
   const ytCount = data?.ytLoggedInCount ?? 0;
@@ -148,8 +178,8 @@ export default function HomeScreen() {
 function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.screenBackground },
-    content: { padding: 16, paddingTop: 60, gap: 14, paddingBottom: 24 },
-    topBar: { flexDirection: "row", alignItems: "center", gap: 12 },
+    content: { padding: 16, paddingTop: 56, gap: 11, paddingBottom: 24 },
+    topBar: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 2 },
     liveCard: {
       flex: 1,
       backgroundColor: colors.elevatedBackground,
@@ -186,12 +216,12 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
       alignItems: "center",
     },
     badgeText: { color: "#fff", fontSize: 10, fontWeight: "bold" },
-    links: { gap: 12, marginTop: 4, flex: 1, justifyContent: "space-between" },
+    links: { gap: 11, marginTop: 2, flex: 1, justifyContent: "space-between" },
     linkCard: {
       flexDirection: "row",
       backgroundColor: colors.surfaceBackground,
       borderRadius: 16,
-      paddingVertical: 20,
+      paddingVertical: 19,
       paddingHorizontal: 24,
       alignItems: "center",
       justifyContent: "space-between",
@@ -205,7 +235,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
     },
     linkTitle: { fontSize: 22, fontWeight: "bold", color: colors.primaryText, flex: 1, textAlign: "center" },
     linkIcon: { opacity: 0.85 },
-    bottomRow: { flexDirection: "row", gap: 12, marginTop: 8 },
+    bottomRow: { flexDirection: "row", gap: 12, marginTop: 0 },
     gwctCard: {
       flex: 1.2,
       backgroundColor: colors.surfaceBackground,

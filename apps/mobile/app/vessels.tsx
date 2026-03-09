@@ -65,7 +65,10 @@ function rowTone(rowColor: VesselRowColor) {
 export default function VesselsScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
-  const { data, loading, refresh } = useEndpoint<VesselsResponse>(API_URLS.vessels);
+  const { data, loading, refresh } = useEndpoint<VesselsResponse>(API_URLS.vessels, {
+    pollMs: 5000,
+    liveSources: ["gwct_schedule_list"],
+  });
 
   return (
     <ScrollView

@@ -40,18 +40,6 @@ interface EventsResponse {
   }>;
 }
 
-interface ClearEventsResponse {
-  ok: boolean;
-  clearedAt: string;
-  deleted: {
-    alertEvents: number;
-    vesselScheduleChangeEvents: number;
-    equipmentLoginEvents: number;
-    weatherAlertEvents: number;
-    notificationLogs: number;
-  };
-}
-
 function eventLabel(type: string): string {
   if (type === "yt_unit_status_changed") {
     return "YT 상태 변경";
@@ -112,9 +100,8 @@ export default function AlertsScreen() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      const result = (await response.json()) as ClearEventsResponse;
+      await response.json();
       setData({ count: 0, items: [] });
-      Alert.alert("삭제 완료", `이벤트 로그를 삭제했습니다. (${result.deleted.alertEvents}건)`);
     } catch (err) {
       Alert.alert("삭제 실패", `이벤트 로그 삭제 중 오류가 발생했습니다: ${(err as Error).message}`);
     } finally {

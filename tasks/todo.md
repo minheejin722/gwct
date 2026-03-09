@@ -2221,3 +2221,524 @@
 - Verification:
   - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
   - Note: mobile workspace still has no UI test suite (`mobile tests not configured`)
+
+## Work Over-High Adjustment Verification Plan (2026-03-09)
+- [x] Inspect the YT Work stop-reason matching rules for `오바`.
+- [x] Trace whether the matched rule changes adjusted work totals and ranking output.
+- [x] Verify the behavior with the dedicated YT work-time regression test.
+
+## Work Over-High Adjustment Verification Review
+- Result:
+  - The exact requested rule is **not** implemented as `오바 => +30분`.
+  - The current backend does treat `오바` as the `over_high` bucket, but the adjustment is `+35분`.
+- Evidence:
+  - [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) matches `pattern: /오바/u` under `kind: "over_high"` and sets `adjustmentMinutes: 35`.
+  - The same file applies that delta to `adjustedWorkedMs` and sorts Work ranking by `adjustedWorkedMs`, so the `+35분` rule is live in the actual response path.
+  - [yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) verifies `오바` stop reasons count toward `오바하이` and expects the adjusted total/label based on `+35분`.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+
+## Work Over-High Continuation Rule Plan (2026-03-09)
+- [x] Rework the YT Work over-height stop-reason matcher so partial keywords like `B/BULK`, `오바잇`, `와이어`, and `오바` map to the same `오바하이` rule.
+- [x] Change the over-height time adjustment from `+35분` to `+30분`.
+- [x] Keep the current work segment open when the latest state is `stopped` or `logged_out` with an over-height reason, including the driverless logout row case, until the driver actually returns to normal flow or a conflicting handoff is observed.
+- [x] Update Work UI copy/behavior only where needed to stay consistent with the new backend semantics.
+- [x] Add regression coverage for continuous counting through over-height stop/logout and rerun the relevant tests.
+
+## Work Over-High Continuation Rule Review
+- Root cause:
+  - The existing Work rules only matched a narrow `오바` keyword, added `+35분`, and still closed the live work segment as soon as the row changed to `stopped` or `logged_out`.
+  - That did not match the operator rule that `B/BULK(오바잇(와이어)작업)`-style stop/logout states still represent ongoing over-height work until the driver returns to normal login flow.
+- Implementation:
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so the `오바하이` rule now:
+    - matches broader partial keywords (`B/BULK`, `오바잇`, `와이어`, `오바`, `OVER-HEIGHT`)
+    - adds `+30분`
+    - keeps the current segment open during `stopped` / `logged_out` snapshots for that reason
+    - still stops the carry-over when a conflicting same-YT handoff is observed
+  - Tightened stop-reason episode dedupe so the same tracked reason kind is counted once per inactive episode until the driver becomes `active` again.
+  - Updated [worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) so the rules card explains the over-height continuation rule and the card no longer shows an empty `운전 중지` block while an over-height stop/logout is still being counted as live work.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Work Break Persistence Plan (2026-03-10)
+- [x] Verify whether meal-break windows keep the current shift session alive or drop the Work list to empty.
+- [x] Fix the post-break grace logic so `team_off` starts only after `break end + 30분`, not immediately after `12:00~13:00` / `00:00~01:00`.
+- [x] Add current-shift recovery from equipment snapshot history when the persisted Work session is empty or missing during a live break.
+- [x] Add regression tests for break persistence and recovery, then rerun the relevant verification.
+
+## Work Break Persistence Review
+- Root cause:
+  - The shift indicator only used `shift start + 30분` as the no-login grace cutoff, so right after meal break ended it could jump straight to `team_off` instead of staying in `awaiting_login`.
+  - If the persisted Work session file was missing during break time, `GET /api/yt/work-time` rebuilt the current shift from only the latest snapshot. When that latest snapshot had no active YTs, the Work list could come back empty even though the same shift had already accumulated drivers before the break.
+- Implementation:
+  - Updated [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so `awaiting_login` now applies during two windows:
+    - shift start until `+30분`
+    - each break end until `+30분`
+  - Added a shift-window helper export and kept `break_time` / `awaiting_login` / `team_off` transitions explicit in the Work indicator path.
+  - Added [repository.ts](C:/coding/gwct/apps/server/src/db/repository.ts) support for loading grouped equipment snapshots since the current shift start.
+  - Updated [api.ts](C:/coding/gwct/apps/server/src/routes/api.ts) so `GET /api/yt/work-time` can replay the current shift's equipment history and rebuild the persisted Work session before applying the latest snapshot. That prevents the break-time empty-list regression when the session file is absent.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Work Meal-Break Carry-Over Verification Plan (2026-03-10)
+- [x] Recheck the Work accumulation code path to confirm that meal breaks subtract time without discarding the stored pre-break total.
+- [x] Verify existing day-shift regression coverage and add an explicit night-shift resume test if needed.
+- [x] Run the focused YT work-time test suite and record the review conclusion.
+
+## Work Meal-Break Carry-Over Verification Review
+- Result:
+  - Verified. Both day and night Work accumulation now preserve the pre-break total and continue from that same total when work resumes after the meal break.
+- Evidence:
+  - [service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) computes worked time by subtracting overlap with configured break windows from each segment, not by resetting driver totals.
+  - When a segment closes, the worked milliseconds are added into persisted `totalWorkedMs`; when work resumes, a new `currentSegmentStartedAt` opens on top of the existing total instead of replacing it.
+  - Existing day-shift regression already proved `11:50 -> lunch break -> 13:30 relogin` keeps the old total and resumes accumulation.
+  - Added an explicit night-shift regression proving `23:50 -> 00:10 meal stop -> 01:20 resume` keeps the pre-break `10분` and grows it to `30분` after work restarts.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts` ✅
+
+## Home Focus Refresh Plan (2026-03-10)
+- [x] Inspect the current home-tab data flow and identify which endpoints drive the bell badge and GWCT/YT summary widgets.
+- [x] Trigger a silent refresh of those home endpoints whenever the Home screen regains focus.
+- [x] Run mobile typecheck and document the result.
+
+## Home Focus Refresh Review
+- Root cause:
+  - The Home screen loaded `summary` and `yt` once on mount, then only refreshed when the user manually pulled the screen.
+  - That left the bell badge and GWCT/YT widgets stale after visiting another screen until the user scrolled and triggered refresh manually.
+- Implementation:
+  - Updated [index.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) to use `useFocusEffect`.
+  - When the Home tab regains focus, it now silently refreshes both:
+    - `GET /api/dashboard/summary`
+    - `GET /api/yt/live`
+  - The refresh is silent, so the values update immediately without showing a pull-to-refresh spinner every time the user returns home.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no automated UI test suite, so actual navigation behavior was not device-tested in this pass.
+
+## Home Badge Immediate Clear Follow-Up Plan (2026-03-10)
+- [x] Re-check why the bell badge could stay blue after clearing events and returning home.
+- [x] Make Home react immediately to the `events_cleared` SSE event instead of waiting only for the next fetch result.
+- [x] Re-run mobile typecheck and record the follow-up review.
+
+## Home Badge Immediate Clear Follow-Up Review
+- Root cause:
+  - Home focus refresh alone was not enough for the user flow `Events clear -> Home tab`, because the Home badge still depended on the previous `summary` payload until the silent network refresh completed.
+  - The Home live hook listened for new `alert` SSE events, but it did not listen for the `events_cleared` broadcast that the server already emitted after `DELETE /api/events`.
+- Implementation:
+  - Updated [useSseAlerts.ts](C:/coding/gwct/apps/mobile/hooks/useSseAlerts.ts) to listen for `events_cleared`, clear `lastAlert`, and expose `eventsClearedAt`.
+  - Updated [index.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) so Home immediately forces `alertCount24h` to `0` when `events_cleared` arrives, while still keeping the focus-based silent refresh for full server sync.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no automated UI test suite, so this pass confirms compile safety but not device-level navigation timing.
+
+## Vessel ETA Copy Plan (2026-03-10)
+- [x] Inspect the shared ETA adjustment message formatter and locate every test that asserts the current copy.
+- [x] Change the suffix from `N번째 ETA 조정` to `N번째 조정`.
+- [x] Update duration wording so `0시간 N분` becomes `N분`, and `N시간 0분` becomes `N시간`.
+- [x] Run the affected server tests and document the review.
+
+## Vessel ETA Copy Review
+- Root cause:
+  - The shared ETA formatter always rendered both hour and minute units, so messages like `0시간 30분`, `2시간 0분`, and `26시간 0분` leaked into the Vessel Schedule UI.
+  - The ETA adjustment suffix still used `N번째 ETA 조정` even though the user wanted the shorter `N번째 조정`.
+- Implementation:
+  - Updated [eta.ts](C:/coding/gwct/packages/shared/src/events/eta.ts) so:
+    - `0시간 N분` => `N분`
+    - `N시간 0분` => `N시간`
+    - mixed values keep `N시간 N분`
+    - `N번째 ETA 조정` => `N번째 조정`
+  - Updated ETA-related tests across monitor/live-row/event-clear flows to the new wording.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/monitor-service-eta-adjustment.test.ts tests/vessels-live-rows.test.ts tests/events-clear-api.test.ts` ✅
+  - `npm.cmd run typecheck` ✅
+
+## Tab Bar Press Feedback Plan (2026-03-10)
+- [x] Inspect the current bottom-tab layout and icon setup.
+- [x] Add a custom tab bar button so the selected tab reads as a filled icon and a pressed tab shrinks with a stronger filled background.
+- [x] Run mobile typecheck and document the review.
+
+## Tab Bar Press Feedback Review
+- Root cause:
+  - The bottom tab bar was still using the default Expo Router tab button behavior, so the active state only changed tint color and the press interaction had almost no tactile feedback.
+- Implementation:
+  - Rebuilt [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) with a custom tab button wrapper.
+  - Active tabs now switch from outline icons to filled icons (`home`, `grid`, `person`, `construct`, `settings`) so the selected state reads much more clearly.
+  - Press-and-hold now adds two feedback cues:
+    - the whole tab button gets a stronger accent-filled background
+    - the icon/label content springs down to `0.9x` scale while the finger is down, then rebounds on release
+  - Selected tabs also keep a lighter accent-filled background even when not pressed, so the chosen destination reads as “filled” rather than just recolored.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no automated UI test suite, so the tactile feel itself was not device-tested in this pass.
+
+## Home Indicator Spacing Plan (2026-03-10)
+- [x] Recheck the current tab bar height/padding and identify the smallest safe adjustment that lifts the controls slightly.
+- [x] Increase the bottom-tab vertical breathing room without changing the home screen card grid itself.
+- [x] Run mobile typecheck and document the result.
+
+## Home Indicator Spacing Review
+- Root cause:
+  - After the press-feedback refresh, the tab bar still sat a little too close to the iPhone home indicator, so the lower touch area felt cramped and easy to mis-hit.
+- Implementation:
+  - Kept the Home screen layout itself untouched.
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) with a small tab-bar-only spacing adjustment:
+    - `height`: `68 -> 76`
+    - `paddingBottom`: `8 -> 12`
+    - `paddingTop`: `8 -> 7`
+
+## Home Tab Polish Plan (2026-03-10)
+- [x] Recheck the Home screen bottom widgets and tab bar together so only the lowest visual block moves.
+- [x] Lift the GWCT and YT widgets slightly without disturbing the existing card grid.
+- [x] Remove the tab-bar square highlight and leave only icon fill plus press-scale feedback.
+- [x] Increase tab-bar bottom breathing room one more small step, then run mobile typecheck.
+
+## Home Tab Polish Review
+- Root cause:
+  - The recent custom tab feedback solved the tap feel, but the added button background/border read as a separate square control and made the selected tab feel visually heavy.
+  - The bottom safe-area issue also needed one more small vertical adjustment, but only near the lowest Home widgets and the tab bar itself.
+- Implementation:
+  - Updated [app/(tabs)/index.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) to pull the GWCT/YT bottom row up slightly by reducing its top margin from `8` to `4`.
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) to remove the tab-button square background/border completely.
+  - Kept the icon-only pressed feedback by preserving the spring scale animation on press.
+  - Raised the tab content slightly again by changing the tab-bar spacing to `height: 80`, `paddingBottom: 15`, `paddingTop: 6`, and button margins to `marginTop: 2`, `marginBottom: 8`.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Home Vertical Rhythm Plan (2026-03-10)
+- [x] Recheck the full Home stack spacing instead of only the bottom widget row.
+- [x] Pull the content stack slightly upward by trimming the top padding and vertical gaps while keeping the card layout unchanged.
+- [x] Preserve the icon-only tab feedback and verify the new Home spacing against the raised tab bar.
+- [x] Run mobile typecheck and document the review plus the correction lesson.
+
+## Home Vertical Rhythm Review
+- Root cause:
+  - Moving only the bottom GWCT/YT row was too local. The top live section and the five navigation cards still held the overall stack too low, so the bottom widgets remained visually cramped against the tab bar.
+- Implementation:
+  - Updated [app/(tabs)/index.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) to shift the whole Home stack slightly upward by trimming the main vertical spacing:
+    - `content.paddingTop`: `60 -> 56`
+    - `content.gap`: `14 -> 13`
+    - `links.gap`: `12 -> 11`
+    - `links.marginTop`: `4 -> 2`
+    - `linkCard.paddingVertical`: `20 -> 19`
+    - `bottomRow.marginTop`: `4 -> 2`
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) to lift the tab icons slightly inside the already-expanded tab bar:
+    - `tabButton.marginTop`: `2 -> 1`
+    - `tabButton.marginBottom`: `8 -> 9`
+    - `tabBarStyle.paddingBottom`: `15 -> 16`
+    - `tabBarStyle.paddingTop`: `6 -> 5`
+  - Kept the icon-only tab feedback: no square button background, filled active icon state preserved, press-scale animation preserved.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Home Widget Gap Plan (2026-03-10)
+- [x] Recheck the latest Home spacing change with emphasis on the monitor-settings-to-widget gap only.
+- [x] Reduce only the gap above the GWCT/YT row and leave widget sizing untouched.
+- [x] Lift the tab-bar contents slightly again without bringing back any square button chrome.
+- [x] Run mobile typecheck and document the correction.
+
+## Home Widget Gap Review
+- Root cause:
+  - The last pass compressed the whole Home stack correctly, but the user's specific request was narrower: keep the GWCT/YT widgets at their existing size and only tighten the gap above them.
+- Implementation:
+  - Updated [app/(tabs)/index.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/index.tsx) so the lower-section gap tightens without shrinking the widgets:
+    - `content.gap`: `13 -> 11`
+    - `topBar.marginBottom`: `+2` to avoid over-compressing the top section
+    - `bottomRow.marginTop`: `2 -> 0`
+  - Left the GWCT/YT card padding and typography unchanged.
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) to raise the tab contents slightly again:
+    - `tabButton.marginTop`: `1 -> 0`
+    - `tabButton.marginBottom`: `9 -> 10`
+    - `tabBarStyle.paddingBottom`: `16 -> 17`
+    - `tabBarStyle.paddingTop`: `5 -> 4`
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tab Bar Raise Plan (2026-03-10)
+- [x] Recheck the current tab-bar-only spacing values.
+- [x] Raise only the tab bar slightly without changing the Home screen layout.
+- [x] Run mobile typecheck and document the correction.
+
+## Tab Bar Raise Review
+- Root cause:
+  - The previous pass already fixed the widget-to-bar gap, but the user wanted one more tab-bar-only lift without any further Home screen adjustments.
+- Implementation:
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) only.
+  - Increased `tabBarStyle.height` from `80` to `83`.
+  - Increased `tabBarStyle.paddingBottom` from `17` to `18`.
+  - Left the Home widgets and their spacing untouched.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tab Bar Raise Follow-up Plan (2026-03-10)
+- [x] Recheck the current tab-bar-only spacing values after the last raise.
+- [x] Raise only the tab bar further without touching the Home layout.
+- [x] Run mobile typecheck and document the correction.
+
+## Tab Bar Raise Follow-up Review
+- Root cause:
+  - The previous tab-bar raise was still visually too conservative relative to the bottom widgets, so the gap still read as overly tall.
+- Implementation:
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) only.
+  - Increased `tabBarStyle.height` from `83` to `90`.
+  - Increased `tabBarStyle.paddingBottom` from `18` to `19`.
+  - Left the Home screen spacing and widget sizes unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tab Bar Nudge Down Plan (2026-03-10)
+- [x] Recheck the current tab-bar-only spacing values.
+- [x] Lower only the tab-bar container by one unit.
+- [x] Run mobile typecheck and document the correction.
+
+## Tab Bar Nudge Down Review
+- Root cause:
+  - After the larger raise, the user wanted a one-step rollback rather than another broader spacing rebalance.
+- Implementation:
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) only.
+  - Reduced `tabBarStyle.height` from `90` to `89`.
+  - Left the Home screen layout and the rest of the tab-bar spacing untouched.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Work Ranking Investigation Plan (2026-03-10)
+- [x] Capture the investigation scope from the reported screenshot symptoms.
+- [x] Inspect Work accumulation and sorting logic for meal-break handling, displayed start time semantics, and ranking tie-breaks.
+- [x] Reproduce the reported pattern with code/tests and decide whether the behavior is expected or buggy.
+- [x] If buggy, implement the fix, add regression coverage, verify it, and document the result.
+
+## Work Ranking Investigation Review
+- Root cause:
+  - The equal `0시간 36분` / `0시간 37분` values in the screenshot were not a counting bug. During the night shift, `00:00~01:00` is excluded from worked time, so drivers who first logged in at `00:48`, `00:49`, `00:50`, `00:56`, or `00:57` all start accumulating from `01:00` and therefore can show the same worked minutes.
+  - The real bug was the ranking tie-break. When `adjustedWorkedMs` was equal, the backend sorted by `driverName`, so a driver with an earlier displayed `운전 시작` could still appear below a later one.
+- Implementation:
+  - Updated [apps/server/src/services/ytWorkTime/service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so the rank sort order is now:
+    - `adjustedWorkedMs` descending
+    - `totalWorkedMs` descending
+    - `firstSeenAt` ascending
+    - `currentSegmentStartedAt` ascending
+    - `driverName` ascending
+  - Added a regression test in [apps/server/tests/yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) that reproduces the midnight-break case where different start times still have equal worked minutes, and verifies that tied drivers now rank by earlier start time instead of by name.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts`
+  - `npm.cmd run typecheck`
+
+## Work Break Window Plan (2026-03-10)
+- [x] Add the requested scope for the meal-break window and Work rules-card copy change.
+- [x] Update backend meal-break windows from 60 minutes to 40 minutes and align the break-status detail text.
+- [x] Remove the over-height stop/logout explanation row from the Work rules card.
+- [x] Update regression tests, run YT Work tests plus typecheck, and document the correction.
+
+## Work Break Window Review
+- Root cause:
+  - The fixed meal-break windows were still modeled as `12:00~13:00` and `00:00~01:00`, and the Work rules card still showed an extra over-height explanation row that the user wanted removed.
+- Implementation:
+  - Updated [apps/server/src/services/ytWorkTime/service.ts](C:/coding/gwct/apps/server/src/services/ytWorkTime/service.ts) so the fixed break windows are now:
+    - day: `12:00 ~ 12:40`
+    - night: `00:00 ~ 00:40`
+  - Updated the break-status detail text in the same service file to show the new `12:40` / `00:40` end times.
+  - Rewrote [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) with clean text and removed the `Over-height stop/logout keeps counting until re-login` row from the `Time Adjustments` section.
+  - Updated [apps/server/tests/yt-work-time.test.ts](C:/coding/gwct/apps/server/tests/yt-work-time.test.ts) expectations for the shorter break windows, including lunch/night accumulated minutes and the `awaiting_login -> team_off` timing.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-work-time.test.ts tests/yt-work-time-api.test.ts`
+  - `npm.cmd run typecheck`
+
+## Work Rules Indent Plan (2026-03-10)
+- [x] Recheck the Work rules-card row styles for the dotted sections.
+- [x] Move only the dotted rule rows slightly to the right without changing the card layout.
+- [x] Run mobile typecheck and document the correction.
+
+## Work Rules Indent Review
+- Root cause:
+  - The dotted rows under `Shift Schedule` and `Time Adjustments` were starting too far left relative to the section-title emoji/text, so the small bullet list looked slightly under-indented.
+- Implementation:
+  - Updated [app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) only.
+  - Added `paddingLeft: 8` to `rulesRow` so the bullet, row icon, and text all move right together while preserving their existing internal spacing.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tab Press Animation Plan (2026-03-10)
+- [x] Recheck the current bottom-tab press animation values.
+- [x] Make the press animation shrink a bit more before springing back.
+- [x] Run mobile typecheck and document the correction.
+
+## Tab Press Animation Review
+- Root cause:
+  - The existing tab press feedback was readable, but the shrink amount was too mild to feel punchy on touch.
+- Implementation:
+  - Updated [app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) only.
+  - Changed press-in scale from `0.9` to `0.82` and tightened the press-in spring so the icon/label compress more noticeably.
+  - Adjusted the press-out spring to rebound a little more crisply while keeping the same overall interaction model.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+    - tab button `marginBottom`: `2 -> 6`
+  - That lifts the interactive tab content slightly higher and gives the bar a bit more vertical breathing room without changing the card rows/columns on Home.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck` ✅
+  - Note: mobile workspace still has no automated UI test suite, so the touch feel itself was not device-tested in this pass.
+
+## Monitoring Tactile Feedback Plan (2026-03-10)
+- [x] Inspect the Monitoring settings screens and identify every enable/disable, confirm/cancel, and plus/minus control that needs richer press feedback.
+- [x] Build a shared tactile pressable that adds a subtle sink, compression, and rebound without redesigning each screen independently.
+- [x] Apply the shared control to all Monitoring settings actions and steppers.
+- [x] Run mobile typecheck, review the touch model, and document the result.
+
+## Monitoring Tactile Feedback Review
+- Root cause:
+  - The Monitoring settings controls were visually correct but still felt flat on touch because the buttons only changed color. They were missing the small depth cues that make a press feel intentional, like a slight sink and a quick rebound.
+- Implementation:
+  - Added [apps/mobile/components/TactilePressable.tsx](C:/coding/gwct/apps/mobile/components/TactilePressable.tsx) as a shared animated press wrapper.
+  - The shared control compresses and drops slightly on press-in, relaxes its shadow while pressed, and springs back on release.
+  - It exposes two variants:
+    - `regular` for `Enable`, `Disable`, `Confirm`, `Cancel`
+    - `compact` for `+` / `-` steppers with a slightly tighter, punchier compression
+  - Applied the shared control to:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+    - [apps/mobile/app/monitor-yeosu.tsx](C:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx)
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - Note: this pass verified the code path and typings, but did not include physical-device tuning of the exact press feel.
+
+## Monitoring Tactile Motion Correction Plan (2026-03-10)
+- [x] Recheck the shared Monitoring tactile button motion that was causing the press feedback to feel like the screen was shifting vertically.
+- [x] Remove only the vertical movement from the shared button animation while keeping the scale/shadow tactile feel.
+- [x] Run mobile typecheck and document the correction.
+
+## Monitoring Tactile Motion Correction Review
+- Root cause:
+  - The added `translateY` sink made the button feel like it was bouncing the layout instead of simply compressing under the finger, which read as an awkward refresh-like motion.
+- Implementation:
+  - Updated [apps/mobile/components/TactilePressable.tsx](C:/coding/gwct/apps/mobile/components/TactilePressable.tsx) only.
+  - Removed the vertical `translateY` animation from both tactile variants.
+  - Kept the scale compression, pressed shadow reduction, and spring-back so the buttons still feel tactile without the up/down wobble.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Keyboard Plan (2026-03-10)
+- [x] Inspect every Monitoring settings input that still forces the iOS numeric keypad.
+- [x] Switch those inputs to the default keyboard while keeping the entered values numeric-only.
+- [x] Run mobile typecheck and document the result.
+
+## Monitoring Keyboard Review
+- Root cause:
+  - The Monitoring settings inputs were explicitly using `keyboardType=\"number-pad\"`, so iOS was always showing the narrow numeric keypad instead of the standard keyboard layout.
+- Implementation:
+  - Added [apps/mobile/lib/sanitizeNumericInput.ts](C:/coding/gwct/apps/mobile/lib/sanitizeNumericInput.ts) to keep Monitoring threshold inputs digit-only even when using the default keyboard.
+  - Updated these inputs to use `keyboardType=\"default\"` plus numeric sanitization:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+  - Added `returnKeyType=\"done\"` and disabled autocorrect/spellcheck on those numeric fields so the keyboard behaves more like a clean system input instead of a search field.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Input Submit Plan (2026-03-10)
+- [x] Recheck the Monitoring numeric inputs after the keyboard change and confirm how the return key behaves.
+- [x] Change those inputs so the keyboard `search` key triggers the existing confirm action immediately.
+- [x] Run mobile typecheck and document the correction.
+
+## Monitoring Input Submit Review
+- Root cause:
+  - After switching the Monitoring numeric fields to the default keyboard, the return key no longer matched the intended workflow. Operators still had to tap `Confirm` manually even though the keyboard could submit directly.
+- Implementation:
+  - Updated the Monitoring numeric inputs to use `returnKeyType="search"` and wired `onSubmitEditing` to the existing confirm handler on each relevant screen:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+  - The button logic itself was not duplicated; the keyboard submit now calls the same save path the visible `Confirm` button already uses.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Success Alert Removal Plan (2026-03-10)
+- [x] Inspect mobile settings and delete flows for post-success modal alerts.
+- [x] Remove the unnecessary success alerts while keeping failure alerts and destructive confirmations.
+- [x] Run mobile typecheck and document the result.
+
+## Success Alert Removal Review
+- Root cause:
+  - Several settings and delete flows were still showing blocking success modals even though the screen state already refreshed immediately. That duplicated feedback and interrupted the operator's flow without adding real information.
+- Implementation:
+  - Removed post-success `Alert.alert(...)` calls from:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+    - [apps/mobile/app/monitor-yeosu.tsx](C:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx)
+    - [apps/mobile/app/(tabs)/alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx)
+  - Kept error alerts in place so failed saves/deletes still surface clearly.
+  - Kept the pre-delete confirmation dialog in Events because that is a destructive guard, not a post-success notification.
+- Verification:
+  - `rg -n "Alert\\.alert\\(" apps/mobile`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Work Rank Medal Plan (2026-03-10)
+- [x] Inspect the Work rank label render path.
+- [x] Add medal emojis to 1st, 2nd, and 3rd place without disturbing the rest of the rank labels.
+- [x] Run mobile typecheck and document the result.
+
+## Work Rank Medal Review
+- Root cause:
+  - The Work rank cards only rendered plain ordinal labels, so the top three positions were not visually distinguished. The existing `꼴등` rule also would have conflicted with a 3-person ranking if medals were added naively.
+- Implementation:
+  - Updated [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx) only.
+  - Changed `rankLabel(...)` so it now returns:
+    - `1등 🥇`
+    - `2등 🥈`
+    - `3등 🥉`
+  - Moved the `꼴등` fallback behind the medal checks and limited it to lists with more than 3 drivers so 3등이 꼴등으로 바뀌지 않게 했습니다.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Scraper Latency Tightening Plan (2026-03-10)
+- [ ] Inspect the end-to-end latency path across server scrape scheduling, fetch wait behavior, persistence, SSE fan-out, and mobile refresh behavior.
+- [ ] Record the measured current intervals and recent scrape durations, then decide a tighter but still safe operating point.
+- [ ] Implement the latency reduction with minimal architectural churn:
+  - lower the live scrape intervals and jitter conservatively but materially
+  - remove avoidable fetch-side delay
+  - push live source-update invalidation over SSE so active mobile screens refresh immediately instead of waiting for long polling windows
+- [ ] Run verification for both server and mobile and document the performance tradeoff and remaining limits.
+
+## Scraper Latency Investigation Notes
+- Current configured live intervals in [apps/server/.env](C:/coding/gwct/apps/server/.env) are:
+  - `GWCT_INTERVAL_MS=30000`
+  - `GWCT_GC_INTERVAL_MS=25000`
+  - `YS_INTERVAL_MS=60000`
+  - `JITTER_MS=3000`
+- Recent `ScrapeRun` samples from the local DB show the fetch/parse work itself is much faster than those intervals:
+  - `gwct_schedule_list`: avg `694ms`, max `752ms`
+  - `gwct_work_status`: avg `1321ms`, max `2034ms`
+  - `gwct_gc_remaining`: avg `1478ms`, max `2613ms`
+  - `gwct_equipment_status`: avg `883ms`, max `927ms`
+  - `ys_forecast`: avg `1654ms`, max `1723ms`
+- The current user-facing lag is therefore dominated by scheduling and client refresh strategy, not parser CPU time.
+
+## Scraper Latency Tightening Review
+- Root cause:
+  - The observed 10-second-class lag was not coming from parser CPU work. The local measurements showed most scrapes finishing in under 2 seconds, but the system was still waiting on:
+    - very loose source intervals (`30s` / `25s` / `60s`)
+    - per-cycle scheduler drift because the next run waited the full interval after completion
+    - an extra fixed `350ms` fetch-side wait
+    - mobile screens that often polled every `20s~30s` or not at all
+  - That meant the app could miss a fresh scrape even after the server already had the new snapshot.
+- Implementation:
+  - Tightened live server defaults and the active local runtime config:
+    - [apps/server/src/config/env.ts](C:/coding/gwct/apps/server/src/config/env.ts)
+    - [apps/server/.env.example](C:/coding/gwct/apps/server/.env.example)
+    - [apps/server/.env](C:/coding/gwct/apps/server/.env)
+  - New values:
+    - `GWCT_INTERVAL_MS=2000`
+    - `GWCT_GC_INTERVAL_MS=2000`
+    - `YS_INTERVAL_MS=10000`
+    - `JITTER_MS=250`
+  - Changed [apps/server/src/services/scheduler.ts](C:/coding/gwct/apps/server/src/services/scheduler.ts) from an "interval after completion" pattern to a start-cadence-compensated loop, so short scrapes stay close to the configured cadence instead of drifting by their own runtime every cycle.
+  - Reduced the fixed post-load wait in [apps/server/src/scraper/fetcher.ts](C:/coding/gwct/apps/server/src/scraper/fetcher.ts) from `350ms` to `150ms`.
+  - Added server-side SSE invalidation in [apps/server/src/services/monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts) so each successful scrape broadcasts `source_updated` immediately.
+  - Extended [apps/mobile/hooks/useEndpoint.ts](C:/coding/gwct/apps/mobile/hooks/useEndpoint.ts) so screens can subscribe to live source updates and silently refresh right away instead of waiting for the next long polling window. The hook also now skips overlapping fetches to avoid self-inflicted burst traffic.
+  - Wired the active live screens and monitor pages to the relevant source updates, and reduced their fallback polling windows to `5s` for GWCT live data and `10s` for YS weather data.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/scheduler.test.ts tests/monitor-service-eta-adjustment.test.ts`
+  - `npm.cmd run typecheck`
+- Tradeoff:
+  - This materially reduces lag, but it is still not mathematically guaranteed to stay under 2 seconds in every case because the upstream websites themselves can take `1~2.6s` to respond and parse. The new setup is designed to push the app close to the scrape completion time without making the server poll blindly every few hundred milliseconds.
+  - If even tighter behavior is needed after observing this in production, the next structural optimization would be to deduplicate shared-page fetches like `gwct_work_status` and `gwct_gc_remaining`, which currently hit the same GWCT `m=F&s=A` page separately.

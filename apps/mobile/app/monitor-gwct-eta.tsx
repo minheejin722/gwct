@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface GwctEtaMonitorResponse {
   enabled: boolean;
@@ -103,7 +105,8 @@ async function saveGwctEtaConfig(payload: Record<string, unknown>) {
 
 export default function MonitorGwctEtaScreen() {
   const { data, loading, error, refresh } = useEndpoint<GwctEtaMonitorResponse>(API_URLS.monitorGwctEta, {
-    pollMs: 25000,
+    pollMs: 5000,
+    liveSources: ["gwct_schedule_list"],
   });
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
@@ -134,7 +137,6 @@ export default function MonitorGwctEtaScreen() {
         trackingCount: parsedCount,
       });
       await refresh();
-      Alert.alert("Saved", "GWCT ETA monitor is now enabled.");
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -147,7 +149,6 @@ export default function MonitorGwctEtaScreen() {
     try {
       await saveGwctEtaConfig({ enabled: false });
       await refresh();
-      Alert.alert("Disabled", "GWCT ETA monitor is now disabled.");
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -208,30 +209,39 @@ export default function MonitorGwctEtaScreen() {
         </View>
 
         <View style={styles.stepShell}>
-          <Pressable style={styles.stepButton} onPress={() => step(-1)}>
+          <TactilePressable style={styles.stepButton} variant="compact" onPress={() => step(-1)}>
             <Text style={styles.stepText}>-</Text>
-          </Pressable>
-          <TextInput style={styles.input} value={countInput} onChangeText={setCountInput} keyboardType="number-pad" />
-          <Pressable style={styles.stepButton} onPress={() => step(1)}>
+          </TactilePressable>
+          <TextInput
+            style={styles.input}
+            value={countInput}
+            onChangeText={(text) => setCountInput(sanitizeNumericInput(text))}
+            keyboardType="default"
+            returnKeyType="search"
+            onSubmitEditing={() => void onConfirm()}
+            autoCorrect={false}
+            spellCheck={false}
+          />
+          <TactilePressable style={styles.stepButton} variant="compact" onPress={() => step(1)}>
             <Text style={styles.stepText}>+</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
 
         <View style={styles.buttonRow}>
-          <Pressable
+          <TactilePressable
             style={[styles.primaryButton, saving ? styles.disabled : null]}
             onPress={() => void onConfirm()}
             disabled={saving}
           >
             <Text style={styles.primaryText}>{saving ? "Saving..." : "Enable"}</Text>
-          </Pressable>
-          <Pressable
+          </TactilePressable>
+          <TactilePressable
             style={[styles.secondaryButton, saving ? styles.disabled : null]}
             onPress={() => void onCancel()}
             disabled={saving}
           >
             <Text style={styles.secondaryText}>Disable</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
       </View>
 

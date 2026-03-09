@@ -102,7 +102,10 @@ function StatusMark({
 export default function EquipmentScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
-  const latest = useEndpoint<EquipmentLatestResponse>(API_URLS.equipmentLatest, { pollMs: 25000 });
+  const latest = useEndpoint<EquipmentLatestResponse>(API_URLS.equipmentLatest, {
+    pollMs: 5000,
+    liveSources: ["gwct_equipment_status"],
+  });
 
   const gcStates = useMemo<GcCrewRow[]>(
     () => {

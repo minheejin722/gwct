@@ -96,7 +96,10 @@ function formatLoggedOutTime(value: string | null | undefined): string {
 export default function YtScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
-  const { data, loading, refresh, error } = useEndpoint<YtResponse>(API_URLS.yt, { pollMs: 20000 });
+  const { data, loading, refresh, error } = useEndpoint<YtResponse>(API_URLS.yt, {
+    pollMs: 5000,
+    liveSources: ["gwct_equipment_status"],
+  });
 
   const count = data?.ytCount ?? data?.snapshot?.totalLoggedIn ?? 0;
   const known = data?.ytKnown ?? data?.snapshot?.totalKnown ?? 0;

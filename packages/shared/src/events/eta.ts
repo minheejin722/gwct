@@ -9,7 +9,7 @@ export interface GwctEtaChangeSummary {
   humanMessage: string;
 }
 
-const ETA_ADJUSTMENT_SUFFIX_PATTERN = /\s+\d+번째 ETA 조정$/u;
+const ETA_ADJUSTMENT_SUFFIX_PATTERN = /\s+\d+번째 조정$/u;
 
 interface ParsedEta {
   year: number;
@@ -62,6 +62,12 @@ function formatDuration(deltaMinutes: number): string {
   const absolute = Math.abs(deltaMinutes);
   const hours = Math.floor(absolute / 60);
   const minutes = absolute % 60;
+  if (hours === 0) {
+    return `${minutes}분`;
+  }
+  if (minutes === 0) {
+    return `${hours}시간`;
+  }
   return `${hours}시간 ${minutes}분`;
 }
 
@@ -89,7 +95,7 @@ export function formatGwctEtaAdjustmentMessage(humanMessage: string, adjustmentC
   if (!Number.isInteger(adjustmentCount) || adjustmentCount < 2) {
     return baseMessage;
   }
-  return `${baseMessage} ${adjustmentCount}번째 ETA 조정`;
+  return `${baseMessage} ${adjustmentCount}번째 조정`;
 }
 
 export function summarizeGwctEtaChange(previousEta: string, currentEta: string): GwctEtaChangeSummary | null {

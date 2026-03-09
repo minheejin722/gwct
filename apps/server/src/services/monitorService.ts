@@ -13,6 +13,7 @@ import {
 } from "../engine/diff.js";
 import { parseBySource } from "../parsers/index.js";
 import { sha256 } from "../lib/hash.js";
+import type { SseHub } from "../lib/sse.js";
 import type { NotificationService } from "../notifications/service.js";
 import { shouldDispatchRealtimeNotification } from "../notifications/policy.js";
 import type { HtmlFetcher } from "../scraper/fetcher.js";
@@ -56,6 +57,7 @@ export class MonitorService {
     private readonly repo: Repository,
     private readonly fetcher: HtmlFetcher,
     private readonly notificationService: NotificationService,
+    private readonly sseHub: SseHub,
     private readonly logger: FastifyBaseLogger,
   ) {}
 
@@ -143,6 +145,11 @@ export class MonitorService {
         previousEquipmentLatestSnapshot,
       );
       await this.emitEvents(events, seenAt);
+      this.sseHub.broadcast("source_updated", {
+        source: sourceDef.source,
+        capturedAt: seenAt,
+        emittedEvents: events.length,
+      });
 
       await this.repo.finishScrapeRun(run.id, {
         success: true,

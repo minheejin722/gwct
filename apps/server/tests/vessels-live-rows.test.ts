@@ -99,14 +99,14 @@ describe("vessel live rows", () => {
 
     const result = buildVesselLiveRows(
       rows,
-      [etaAlert("SWSI-0002", "2026-03-06T14:00", "2026-03-07T16:00", "내일로 26시간 0분 더 늦게 입항 예정입니다.")],
+      [etaAlert("SWSI-0002", "2026-03-06T14:00", "2026-03-07T16:00", "내일로 26시간 더 늦게 입항 예정입니다.")],
     );
 
     expect(result[0]?.latestEtaChange).toMatchObject({
       eventId: "evt:SWSI-0002",
       previousEtaDisplay: "2026/03/06 14:00",
       currentEtaDisplay: "2026/03/07 16:00",
-      humanMessage: "내일로 26시간 0분 더 늦게 입항 예정입니다.",
+      humanMessage: "내일로 26시간 더 늦게 입항 예정입니다.",
     });
   });
 
@@ -127,7 +127,7 @@ describe("vessel live rows", () => {
       "SWSI-0002",
       "2026-03-06T15:00",
       "2026-03-06T16:00",
-      "종전보다 1시간 0분 더 늦게 입항 예정입니다.",
+      "종전보다 1시간 더 늦게 입항 예정입니다.",
     );
     newestAlert.occurredAt = "2026-03-07T00:06:00.000Z";
 
@@ -135,7 +135,7 @@ describe("vessel live rows", () => {
       "SWSI-0002",
       "2026-03-06T14:00",
       "2026-03-06T15:00",
-      "종전보다 1시간 0분 더 늦게 입항 예정입니다.",
+      "종전보다 1시간 더 늦게 입항 예정입니다.",
     );
     olderAlert.id = "evt:SWSI-0002:older";
     olderAlert.occurredAt = "2026-03-07T00:05:00.000Z";
@@ -145,7 +145,7 @@ describe("vessel live rows", () => {
     expect(result[0]?.latestEtaChange).toMatchObject({
       eventId: "evt:SWSI-0002",
       adjustmentCount: 2,
-      humanMessage: "종전보다 1시간 0분 더 늦게 입항 예정입니다. 2번째 ETA 조정",
+      humanMessage: "종전보다 1시간 더 늦게 입항 예정입니다. 2번째 조정",
     });
   });
 });

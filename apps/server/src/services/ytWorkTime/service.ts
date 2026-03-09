@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   YTUnitSnapshot,
   YTWorkDriverSummary,
   YTWorkShiftIndicator,
@@ -25,14 +25,16 @@ type TrackedStopReasonRule = {
   label: string;
   pattern: RegExp;
   adjustmentMinutes: number;
+  keepsWorkingDuringInactivity?: boolean;
 };
 
 const TRACKED_STOP_REASON_RULES: TrackedStopReasonRule[] = [
   {
     kind: "over_high",
     label: "오바하이",
-    pattern: /오바/u,
-    adjustmentMinutes: 35,
+    pattern: /\bB\s*\/?\s*BULK\b|오바(?:잇|하이)?|와이어|OVER[\s-]?HEIGHT/iu,
+    adjustmentMinutes: 30,
+    keepsWorkingDuringInactivity: true,
   },
   {
     kind: "cabin_shuttle",
@@ -174,10 +176,10 @@ function shiftBreaksForWindow(mode: YTWorkShiftMode, shiftStart: Date): YTWorkSe
   if (mode === "day") {
     const parts = toKstParts(shiftStart);
     const lunchStart = kstDate(parts.year, parts.month, parts.day, 12);
-    const lunchEnd = kstDate(parts.year, parts.month, parts.day, 13);
+    const lunchEnd = kstDate(parts.year, parts.month, parts.day, 12, 40);
     return [
       {
-        label: "점심 휴식",
+        label: "?먯떖 ?댁떇",
         startAt: lunchStart.toISOString(),
         endAt: lunchEnd.toISOString(),
       },
@@ -187,10 +189,10 @@ function shiftBreaksForWindow(mode: YTWorkShiftMode, shiftStart: Date): YTWorkSe
   const nextDay = addDays(startOfDayFor(shiftStart), 1);
   const parts = toKstParts(nextDay);
   const midnight = kstDate(parts.year, parts.month, parts.day, 0);
-  const oneAm = kstDate(parts.year, parts.month, parts.day, 1);
+  const oneAm = kstDate(parts.year, parts.month, parts.day, 0, 40);
   return [
     {
-      label: "자정 휴식",
+      label: "?먯젙 ?댁떇",
       startAt: midnight.toISOString(),
       endAt: oneAm.toISOString(),
     },
@@ -230,6 +232,24 @@ function getShiftWindowForObservedAt(observedAt: string): ShiftWindow | null {
     ? nightShiftStartFor(observedDate)
     : nightShiftStartFor(addDays(observedDate, -1));
   return buildShiftWindowFromStart("night", nightStart);
+}
+
+export function getYtWorkShiftWindowForObservedAt(observedAt: string): {
+  mode: YTWorkShiftMode;
+  shiftWindowStartedAt: string;
+  endsAt: string;
+  breaks: YTWorkSessionBreak[];
+} | null {
+  const shiftWindow = getShiftWindowForObservedAt(observedAt);
+  if (!shiftWindow) {
+    return null;
+  }
+  return {
+    mode: shiftWindow.mode,
+    shiftWindowStartedAt: shiftWindow.shiftWindowStartedAt,
+    endsAt: shiftWindow.endsAt,
+    breaks: shiftWindow.breaks,
+  };
 }
 
 function isSessionActiveForWindow(session: StoredYtWorkSession | null, shiftWindow: ShiftWindow | null): boolean {
@@ -273,7 +293,7 @@ function hasActiveDriver(session: YTWorkSession | null): boolean {
     return false;
   }
 
-  return session.drivers.some((driver) => driver.latestState === "active" && Boolean(driver.currentSegmentStartedAt));
+  return session.drivers.some((driver) => isDriverCollectingWork(driver.latestState, driver.currentSegmentStartedAt, driver.latestStopReason));
 }
 
 function buildShiftIndicator(
@@ -328,11 +348,49 @@ function buildTrackedStopReasonKey(
   reason: string | null | undefined,
 ): string | null {
   const matched = matchTrackedStopReason(reason);
-  const normalized = normalizeStopReason(reason);
-  if (!matched || !normalized || state === "active") {
+  if (!matched || state === "active") {
     return null;
   }
-  return `${state}:${matched.kind}:${normalized}`;
+  return matched.kind;
+}
+
+function shouldKeepWorkingDuringInactivity(
+  state: YTSemanticState,
+  reason: string | null | undefined,
+): boolean {
+  if (state === "active") {
+    return false;
+  }
+  const matched = matchTrackedStopReason(reason);
+  return Boolean(matched?.keepsWorkingDuringInactivity);
+}
+
+function isDriverCollectingWork(
+  state: YTSemanticState,
+  currentSegmentStartedAt: string | null,
+  stopReason: string | null | undefined,
+): boolean {
+  if (!currentSegmentStartedAt) {
+    return false;
+  }
+  return state === "active" || shouldKeepWorkingDuringInactivity(state, stopReason);
+}
+
+function isWithinAwaitingLoginWindow(asOf: string, shiftWindow: ShiftWindow): boolean {
+  const asOfMs = new Date(asOf).getTime();
+  if (!Number.isFinite(asOfMs)) {
+    return false;
+  }
+
+  const shiftGraceDeadlineMs = new Date(shiftWindow.shiftWindowStartedAt).getTime() + SHIFT_LOGIN_GRACE_MS;
+  if (Number.isFinite(shiftGraceDeadlineMs) && asOfMs < shiftGraceDeadlineMs) {
+    return true;
+  }
+
+  return shiftWindow.breaks.some((breakWindow) => {
+    const breakEndMs = new Date(breakWindow.endAt).getTime();
+    return Number.isFinite(breakEndMs) && asOfMs >= breakEndMs && asOfMs < breakEndMs + SHIFT_LOGIN_GRACE_MS;
+  });
 }
 
 function applyTrackedStopReasonCounter(
@@ -613,15 +671,30 @@ export function applyYtWorkSnapshot(
     const latestByYtNoCandidate = trackedYtNo ? ytUnitsByNo.get(trackedYtNo) || null : null;
     const latestByYtNo =
       latestByYtNoCandidate && !normalizeDriverName(latestByYtNoCandidate.driverName) ? latestByYtNoCandidate : null;
+    const trackedYtDriverName = normalizeDriverName(latestByYtNoCandidate?.driverName);
+    const hasTrackedYtHandoff =
+      Boolean(trackedYtDriverName) && buildDriverKey(trackedYtDriverName as string) !== driverKey;
     const latestObserved = latestNamed || latestByYtNo;
     const normalizedObservedStopReason = normalizeStopReason(latestObserved?.stopReason);
     let nextEntry = { ...existingEntry };
 
     if (nextEntry.currentSegmentStartedAt && !activeUnit) {
-      nextEntry = closeSegment(nextEntry, cutoffAt, finalized.breaks);
-      nextEntry.latestState = latestObserved?.semanticState || "logged_out";
-      nextEntry.latestStopReason = normalizedObservedStopReason || nextEntry.latestStopReason;
-      nextEntry.latestYtNo = latestObserved?.ytNo || nextEntry.latestYtNo;
+      const observedInactiveState = latestObserved?.semanticState || nextEntry.latestState;
+      const observedStopReason = normalizedObservedStopReason || nextEntry.latestStopReason;
+      const keepWorking =
+        !hasTrackedYtHandoff && shouldKeepWorkingDuringInactivity(observedInactiveState, observedStopReason);
+
+      if (keepWorking) {
+        nextEntry.activeYtNo = null;
+        nextEntry.latestState = observedInactiveState;
+        nextEntry.latestStopReason = observedStopReason;
+        nextEntry.latestYtNo = latestObserved?.ytNo || nextEntry.latestYtNo;
+      } else {
+        nextEntry = closeSegment(nextEntry, cutoffAt, finalized.breaks);
+        nextEntry.latestState = latestObserved?.semanticState || "logged_out";
+        nextEntry.latestStopReason = normalizedObservedStopReason || nextEntry.latestStopReason;
+        nextEntry.latestYtNo = latestObserved?.ytNo || nextEntry.latestYtNo;
+      }
     } else if (!nextEntry.currentSegmentStartedAt && activeUnit) {
       nextEntry.currentSegmentStartedAt = cutoffAt;
       nextEntry.activeYtNo = activeUnit.ytNo;
@@ -742,6 +815,17 @@ export function materializeYtWorkSession(
       if (right.adjustedWorkedMs !== left.adjustedWorkedMs) {
         return right.adjustedWorkedMs - left.adjustedWorkedMs;
       }
+      if (right.totalWorkedMs !== left.totalWorkedMs) {
+        return right.totalWorkedMs - left.totalWorkedMs;
+      }
+      const firstSeenComparison = compareIsoTimes(left.firstSeenAt, right.firstSeenAt);
+      if (firstSeenComparison !== 0) {
+        return firstSeenComparison;
+      }
+      const currentSegmentComparison = compareIsoTimes(left.currentSegmentStartedAt, right.currentSegmentStartedAt);
+      if (currentSegmentComparison !== 0) {
+        return currentSegmentComparison;
+      }
       return left.driverName.localeCompare(right.driverName);
     });
 
@@ -780,7 +864,7 @@ export function deriveYtWorkShiftIndicator(
       "break_time",
       currentWindow.mode,
       "일시 정지",
-      currentWindow.mode === "day" ? "점심 휴식 12:00 - 13:00" : "새벽 휴식 00:00 - 01:00",
+      currentWindow.mode === "day" ? "점심 휴식 12:00 - 12:40" : "새벽 휴식 00:00 - 00:40",
     );
   }
 
@@ -794,9 +878,7 @@ export function deriveYtWorkShiftIndicator(
     );
   }
 
-  const graceDeadlineMs = new Date(currentWindow.shiftWindowStartedAt).getTime() + SHIFT_LOGIN_GRACE_MS;
-  const asOfMs = new Date(asOf).getTime();
-  if (!Number.isFinite(asOfMs) || asOfMs < graceDeadlineMs) {
+  if (isWithinAwaitingLoginWindow(asOf, currentWindow)) {
     return buildShiftIndicator("paused", "awaiting_login", currentWindow.mode, "일시 정지", "로그인 대기 중");
   }
 
@@ -864,3 +946,4 @@ export async function getYtWorkSessionView(
     shiftStatus: deriveYtWorkShiftIndicator(materializedSession, asOf, hasLiveSnapshot),
   };
 }
+

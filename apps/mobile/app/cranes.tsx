@@ -85,7 +85,10 @@ function workStateTone(
 export default function CranesScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
-  const { data, loading, refresh } = useEndpoint<CranesResponse>(API_URLS.cranes);
+  const { data, loading, refresh } = useEndpoint<CranesResponse>(API_URLS.cranes, {
+    pollMs: 5000,
+    liveSources: ["gwct_gc_remaining", "gwct_work_status", "gwct_equipment_status"],
+  });
   const items = data?.items || [];
   const sortedItems = [...items].sort((left, right) => {
     const priorityDiff = workStatePriority(left.workState) - workStatePriority(right.workState);

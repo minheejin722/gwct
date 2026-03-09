@@ -33,7 +33,16 @@ function stateLabel(state: YTSemanticState): string {
 }
 
 function rankLabel(index: number, total: number): string {
-  if (total > 1 && index === total - 1) {
+  if (index === 0) {
+    return "1등 🥇";
+  }
+  if (index === 1) {
+    return "2등 🥈";
+  }
+  if (index === 2) {
+    return "3등 🥉";
+  }
+  if (total > 3 && index === total - 1) {
     return "꼴등";
   }
   return `${index + 1}등`;
@@ -75,7 +84,8 @@ export default function WorkTimeScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
   const { data, loading, error, refresh } = useEndpoint<YTWorkSessionResponse>(API_URLS.ytWorkTime, {
-    pollMs: 20000,
+    pollMs: 5000,
+    liveSources: ["gwct_equipment_status"],
   });
 
   const session = data?.session || null;
@@ -99,11 +109,11 @@ export default function WorkTimeScreen() {
           <Text style={styles.rulesTitle}>🚜 YT Work Hour Rules</Text>
 
           <View style={styles.rulesSection}>
-            <Text style={styles.rulesSectionTitle}>⏱ Shift Schedule</Text>
+            <Text style={styles.rulesSectionTitle}>⏱️ Shift Schedule</Text>
 
             <View style={styles.rulesRow}>
               <Text style={styles.rulesMarker}>•</Text>
-              <Text style={styles.rulesIcon}>☀️</Text>
+              <Text style={styles.rulesIcon}>🌞</Text>
               <Text style={styles.rulesItemText}>Day Shift: 06:45 - 18:45</Text>
             </View>
 
@@ -119,13 +129,13 @@ export default function WorkTimeScreen() {
 
             <View style={styles.rulesRow}>
               <Text style={styles.rulesMarker}>•</Text>
-              <Text style={styles.rulesIcon}>＋</Text>
+              <Text style={styles.rulesIcon}>+</Text>
               <Text style={styles.rulesItemText}>Over-height: +30 mins</Text>
             </View>
 
             <View style={styles.rulesRow}>
               <Text style={styles.rulesMarker}>•</Text>
-              <Text style={styles.rulesIcon}>ー</Text>
+              <Text style={styles.rulesIcon}>−</Text>
               <Text style={styles.rulesItemText}>Restroom Break: -15 mins</Text>
             </View>
           </View>
@@ -141,8 +151,10 @@ export default function WorkTimeScreen() {
           drivers.map((driver, index) => {
             const isInactive = driver.latestState === "stopped" || driver.latestState === "logged_out";
             const showReason = isInactive && Boolean(driver.latestStopReason);
-            const showStoppedAt = isInactive;
-            const stopCounterSummary = driver.stopReasonCounters.map((item) => `${item.label} ${item.count}회`).join("  ");
+            const showStoppedAt = isInactive && !driver.currentSegmentStartedAt && Boolean(driver.lastWorkedAt);
+            const stopCounterSummary = driver.stopReasonCounters
+              .map((item) => `${item.label} ${item.count}회`)
+              .join("  ");
 
             return (
               <View key={driver.driverKey} style={styles.driverCard}>
@@ -189,7 +201,7 @@ export default function WorkTimeScreen() {
 
                   {showStoppedAt ? (
                     <View style={styles.timeBlock}>
-                      <Text style={styles.timeLabel}>운전 중지</Text>
+                      <Text style={styles.timeLabel}>운전 중단</Text>
                       <Text style={styles.timeValue}>{formatDateTime(driver.lastWorkedAt)}</Text>
                     </View>
                   ) : null}
@@ -297,6 +309,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"], re
       alignItems: "center",
       gap: 8,
       minHeight: 20,
+      paddingLeft: 8,
     },
     rulesMarker: {
       width: 12,

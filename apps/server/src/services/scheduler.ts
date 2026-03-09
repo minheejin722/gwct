@@ -1,12 +1,6 @@
 ﻿import { env } from "../config/env.js";
-import { wait } from "../lib/async.js";
 import type { MonitorService } from "./monitorService.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
-
-interface ScheduledTask {
-  source: string;
-  timer: NodeJS.Timeout;
-}
 
 export class Scheduler {
   private tasks = new Map<string, NodeJS.Timeout>();
@@ -26,15 +20,17 @@ export class Scheduler {
           return;
         }
 
-        const jitter = Math.floor(Math.random() * env.JITTER_MS);
-        await wait(jitter);
+        const startedAt = Date.now();
         await this.monitorService.runSourceOnce(source);
 
-        const timer = setTimeout(run, source.intervalMs);
+        const elapsedMs = Date.now() - startedAt;
+        const nextDelayMs = Math.max(0, source.intervalMs - elapsedMs);
+        const timer = setTimeout(run, nextDelayMs);
         this.tasks.set(source.source, timer);
       };
 
-      const timer = setTimeout(run, 1000);
+      const initialJitterMs = Math.floor(Math.random() * Math.min(env.JITTER_MS, source.intervalMs));
+      const timer = setTimeout(run, 1000 + initialJitterMs);
       this.tasks.set(source.source, timer);
     }
   }

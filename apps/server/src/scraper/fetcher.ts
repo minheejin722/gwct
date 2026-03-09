@@ -159,7 +159,7 @@ export class HtmlFetcher {
             { timeout: Math.min(timeoutMs, 15000) },
           );
         }
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(150);
         const html = await page.content();
         const statusCode = response?.status() ?? null;
         await page.close();

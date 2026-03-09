@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
@@ -96,7 +97,8 @@ async function saveYeosuConfig(payload: Record<string, unknown>) {
 
 export default function MonitorYeosuScreen() {
   const { data, loading, error, refresh } = useEndpoint<YeosuMonitorResponse>(API_URLS.monitorYeosu, {
-    pollMs: 25000,
+    pollMs: 10000,
+    liveSources: ["ys_forecast", "ys_notice", "ys_news"],
   });
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
@@ -110,7 +112,6 @@ export default function MonitorYeosuScreen() {
     try {
       await saveYeosuConfig({ enabled });
       await refresh();
-      Alert.alert("Saved", `Yeosu pilotage monitor is now ${enabled ? "enabled" : "disabled"}.`);
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -186,20 +187,20 @@ export default function MonitorYeosuScreen() {
         </View>
 
         <View style={styles.buttonRow}>
-          <Pressable
+          <TactilePressable
             style={[styles.primaryButton, saving ? styles.disabled : null]}
             onPress={() => void setEnabled(true)}
             disabled={saving}
           >
             <Text style={styles.primaryText}>{saving ? "Saving..." : "Enable"}</Text>
-          </Pressable>
-          <Pressable
+          </TactilePressable>
+          <TactilePressable
             style={[styles.secondaryButton, saving ? styles.disabled : null]}
             onPress={() => void setEnabled(false)}
             disabled={saving}
           >
             <Text style={styles.secondaryText}>Disable</Text>
-          </Pressable>
+          </TactilePressable>
         </View>
       </View>
     </ScrollView>

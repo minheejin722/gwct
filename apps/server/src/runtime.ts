@@ -33,7 +33,7 @@ export async function createRuntime() {
   const fetcher = new HtmlFetcher(browserPool);
   const provider = env.expoPushEnabled ? new ExpoPushProvider() : new NoopNotificationProvider();
   const notificationService = new NotificationService(repo, provider, sseHub);
-  const monitorService = new MonitorService(repo, fetcher, notificationService, app.log);
+  const monitorService = new MonitorService(repo, fetcher, notificationService, sseHub, app.log);
   const scheduler = new Scheduler(monitorService);
   const cleanupService = new DataRetentionService(repo, app.log);
   const cleanupScheduler = new CleanupScheduler(cleanupService, app.log);

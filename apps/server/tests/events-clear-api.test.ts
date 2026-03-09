@@ -232,7 +232,7 @@ describe("events history clear api", () => {
       deltaMinutes: 120,
       direction: "later",
       crossedDate: false,
-      humanMessage: "종전보다 2시간 0분 더 늦게 입항 예정입니다. 2번째 ETA 조정",
+      humanMessage: "종전보다 2시간 더 늦게 입항 예정입니다. 2번째 조정",
       adjustmentCount: 2,
     });
 
@@ -267,7 +267,7 @@ describe("events history clear api", () => {
         {
           vesselKey: "SWSI-0002",
           latestEtaChange: {
-            humanMessage: "종전보다 2시간 0분 더 늦게 입항 예정입니다. 2번째 ETA 조정",
+            humanMessage: "종전보다 2시간 더 늦게 입항 예정입니다. 2번째 조정",
             adjustmentCount: 2,
           },
         },
@@ -284,7 +284,7 @@ describe("events history clear api", () => {
         {
           vesselKey: "SWSI-0002",
           latestEtaChange: {
-            humanMessage: "종전보다 2시간 0분 더 늦게 입항 예정입니다. 2번째 ETA 조정",
+            humanMessage: "종전보다 2시간 더 늦게 입항 예정입니다. 2번째 조정",
             adjustmentCount: 2,
           },
         },
