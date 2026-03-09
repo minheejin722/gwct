@@ -1,5 +1,7 @@
+import { useRef } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ScreenLinkCard } from "../components/ScreenLinkCard";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
@@ -151,10 +153,12 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
 export default function WeatherScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { data, loading, refresh } = useEndpoint<WeatherResponse>(API_URLS.weather, {
     pollMs: 10000,
     liveSources: ["ys_forecast", "ys_notice", "ys_news"],
   });
+  useHeaderScrollToTop(["weather"], scrollRef);
 
   const primary = data?.primary || data?.forecast || null;
   const semantic = primary?.semanticState || "UNKNOWN";
@@ -163,6 +167,7 @@ export default function WeatherScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}

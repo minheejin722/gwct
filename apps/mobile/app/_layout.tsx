@@ -5,6 +5,7 @@ import { Platform, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import EventSource from "react-native-sse";
+import { HeaderScrollTitle } from "../components/HeaderScrollTitle";
 import { AppPreferencesProvider, useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 import { resolveNotificationSound } from "../lib/notificationSound";
@@ -130,16 +131,46 @@ function AppShell() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="vessels" options={{ title: "Vessel Schedule" }} />
-        <Stack.Screen name="cranes" options={{ title: "Crane Status" }} />
-        <Stack.Screen name="equipment" options={{ title: "GC Cabin/Under Status" }} />
-        <Stack.Screen name="yt" options={{ title: "YT Count" }} />
-        <Stack.Screen name="weather" options={{ title: "Pilotage/Weather" }} />
-        <Stack.Screen name="monitor" options={{ title: "Monitoring" }} />
-        <Stack.Screen name="monitor-gwct-eta" options={{ title: "GWCT ETA Monitor" }} />
-        <Stack.Screen name="monitor-gc-remaining" options={{ title: "GC Remaining" }} />
-        <Stack.Screen name="monitor-equipment" options={{ title: "Equipment Monitor" }} />
-        <Stack.Screen name="monitor-yeosu" options={{ title: "Yeosu Pilotage" }} />
+        <Stack.Screen
+          name="vessels"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="vessels" title="Vessel Schedule" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="cranes"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="cranes" title="Crane Status" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="equipment"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="equipment" title="GC Cabin/Under Status" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="yt"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="yt" title="YT Count" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="weather"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="weather" title="Pilotage/Weather" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="monitor"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor" title="Monitoring" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="monitor-gwct-eta"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor-gwct-eta" title="GWCT ETA Monitor" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="monitor-gc-remaining"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor-gc-remaining" title="GC Remaining" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="monitor-equipment"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor-equipment" title="Equipment Monitor" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="monitor-yeosu"
+          options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor-yeosu" title="Yeosu Pilotage" color={colors.primaryText} /> }}
+        />
       </Stack>
     </>
   );

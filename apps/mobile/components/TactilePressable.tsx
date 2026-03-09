@@ -22,17 +22,23 @@ type TactilePressableProps = PressableProps & {
 function variantConfig(variant: TactileVariant) {
   if (variant === "compact") {
     return {
-      scale: 0.9,
-      inSpring: { stiffness: 620, damping: 30, mass: 0.58 },
-      outSpring: { stiffness: 460, damping: 18, mass: 0.68 },
+      scale: 0.8,
+      popScale: 1.045,
+      opacity: 0.82,
+      inSpring: { stiffness: 780, damping: 34, mass: 0.54 },
+      reboundSpring: { stiffness: 920, damping: 14, mass: 0.42 },
+      settleSpring: { stiffness: 620, damping: 24, mass: 0.58 },
       restingShadow: styles.compactRestingShadow,
     };
   }
 
   return {
-    scale: 0.95,
-    inSpring: { stiffness: 520, damping: 28, mass: 0.66 },
-    outSpring: { stiffness: 420, damping: 18, mass: 0.74 },
+    scale: 0.87,
+    popScale: 1.03,
+    opacity: 0.88,
+    inSpring: { stiffness: 680, damping: 32, mass: 0.62 },
+    reboundSpring: { stiffness: 780, damping: 15, mass: 0.48 },
+    settleSpring: { stiffness: 520, damping: 22, mass: 0.66 },
     restingShadow: styles.regularRestingShadow,
   };
 }
@@ -47,16 +53,24 @@ export function TactilePressable({
   ...props
 }: TactilePressableProps) {
   const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
   const [pressed, setPressed] = useState(false);
   const config = variantConfig(variant);
 
   const handlePressIn = (event: GestureResponderEvent) => {
     setPressed(true);
+    scale.stopAnimation();
+    opacity.stopAnimation();
     Animated.parallel([
       Animated.spring(scale, {
         toValue: config.scale,
         useNativeDriver: true,
         ...config.inSpring,
+      }),
+      Animated.timing(opacity, {
+        toValue: config.opacity,
+        duration: 70,
+        useNativeDriver: true,
       }),
     ]).start();
     onPressIn?.(event);
@@ -64,11 +78,25 @@ export function TactilePressable({
 
   const handlePressOut = (event: GestureResponderEvent) => {
     setPressed(false);
+    scale.stopAnimation();
+    opacity.stopAnimation();
     Animated.parallel([
-      Animated.spring(scale, {
+      Animated.sequence([
+        Animated.spring(scale, {
+          toValue: config.popScale,
+          useNativeDriver: true,
+          ...config.reboundSpring,
+        }),
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+          ...config.settleSpring,
+        }),
+      ]),
+      Animated.timing(opacity, {
         toValue: 1,
+        duration: 140,
         useNativeDriver: true,
-        ...config.outSpring,
       }),
     ]).start();
     onPressOut?.(event);
@@ -87,6 +115,7 @@ export function TactilePressable({
         style,
         {
           transform: [{ scale }],
+          opacity,
         },
       ]}
     >
@@ -98,23 +127,23 @@ export function TactilePressable({
 const styles = StyleSheet.create({
   regularRestingShadow: {
     shadowColor: "#09111f",
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 7,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 8,
   },
   compactRestingShadow: {
     shadowColor: "#09111f",
-    shadowOpacity: 0.14,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
+    shadowOpacity: 0.16,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 6,
   },
   pressedShadow: {
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOpacity: 0.02,
+    shadowRadius: 1.5,
     shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    elevation: 0,
   },
   disabledShadow: {
     shadowOpacity: 0,

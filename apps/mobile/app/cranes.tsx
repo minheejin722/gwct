@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { CraneStatus } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { buildCraneRenderKey, reportDuplicateCraneRows } from "../lib/craneKeys";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
@@ -85,6 +86,7 @@ function workStateTone(
 export default function CranesScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { data, loading, refresh } = useEndpoint<CranesResponse>(API_URLS.cranes, {
     pollMs: 5000,
     liveSources: ["gwct_gc_remaining", "gwct_work_status", "gwct_equipment_status"],
@@ -105,9 +107,11 @@ export default function CranesScreen() {
   useEffect(() => {
     reportDuplicateCraneRows(items);
   }, [items]);
+  useHeaderScrollToTop(["cranes"], scrollRef);
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={

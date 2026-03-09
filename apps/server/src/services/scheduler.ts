@@ -1,12 +1,16 @@
-﻿import { env } from "../config/env.js";
-import type { MonitorService } from "./monitorService.js";
+import { env } from "../config/env.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
+import type { MonitorService } from "./monitorService.js";
+import type { GwctCadenceGovernor } from "./scrapeCadence/governor.js";
 
 export class Scheduler {
   private tasks = new Map<string, NodeJS.Timeout>();
   private running = false;
 
-  constructor(private readonly monitorService: MonitorService) {}
+  constructor(
+    private readonly monitorService: MonitorService,
+    private readonly cadenceGovernor?: Pick<GwctCadenceGovernor, "intervalMsFor">,
+  ) {}
 
   async start(): Promise<void> {
     if (this.running) {
@@ -24,7 +28,8 @@ export class Scheduler {
         await this.monitorService.runSourceOnce(source);
 
         const elapsedMs = Date.now() - startedAt;
-        const nextDelayMs = Math.max(0, source.intervalMs - elapsedMs);
+        const targetIntervalMs = this.cadenceGovernor?.intervalMsFor(source, new Date()) ?? source.intervalMs;
+        const nextDelayMs = Math.max(0, targetIntervalMs - elapsedMs);
         const timer = setTimeout(run, nextDelayMs);
         this.tasks.set(source.source, timer);
       };

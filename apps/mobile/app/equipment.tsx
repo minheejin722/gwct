@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { subscribeTabScrollToTop } from "../lib/tabScrollToTop";
 
 type GcCrewStatus = "stopped" | "staffed" | "empty";
 type GcCrewRow = EquipmentLatestResponse["gcStates"][number] & { crewStatus: GcCrewStatus };
@@ -102,6 +104,7 @@ function StatusMark({
 export default function EquipmentScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
   const latest = useEndpoint<EquipmentLatestResponse>(API_URLS.equipmentLatest, {
     pollMs: 5000,
     liveSources: ["gwct_equipment_status"],
@@ -139,8 +142,16 @@ export default function EquipmentScreen() {
     );
   }, [gcStates]);
 
+  useEffect(() => {
+    return subscribeTabScrollToTop("status-tab", () => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+  }, []);
+  useHeaderScrollToTop(["status-tab", "equipment"], scrollRef);
+
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={

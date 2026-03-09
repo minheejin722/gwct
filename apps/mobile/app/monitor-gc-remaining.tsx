@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -10,8 +10,10 @@ import {
 } from "react-native";
 import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { fetchJson } from "../lib/fetchJson";
 import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface GcRemainingMonitorResponse {
@@ -25,6 +27,8 @@ interface GcRemainingMonitorResponse {
   }>;
 }
 
+type GcRemainingMonitorsPayload = Record<string, { enabled: boolean; threshold: number }>;
+
 function clampThreshold(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -34,7 +38,7 @@ function clampThreshold(value: unknown): number {
 }
 
 async function saveGcRule(gc: number, payload: { enabled?: boolean; threshold?: number }) {
-  const response = await fetch(API_URLS.monitorGcRemaining, {
+  return fetchJson<GcRemainingMonitorsPayload>(API_URLS.monitorGcRemaining, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -43,19 +47,13 @@ async function saveGcRule(gc: number, payload: { enabled?: boolean; threshold?: 
       },
     }),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
 }
 
 export default function MonitorGcRemainingScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
-  const { data, loading, error, refresh } = useEndpoint<GcRemainingMonitorResponse>(API_URLS.monitorGcRemaining, {
-    pollMs: 5000,
-    liveSources: ["gwct_gc_remaining"],
-  });
+  const { data, loading, error, refresh, setData } = useEndpoint<GcRemainingMonitorResponse>(API_URLS.monitorGcRemaining);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const [thresholdInputs, setThresholdInputs] = useState<Record<string, string>>({});
   const [savingGc, setSavingGc] = useState<Record<string, boolean>>({});
@@ -79,6 +77,7 @@ export default function MonitorGcRemainingScreen() {
     }
     return map;
   }, [data?.latestItems]);
+  useHeaderScrollToTop(["monitor-gc-remaining"], scrollRef);
 
   const updateInput = (gc: number, text: string) => {
     setThresholdInputs((prev) => ({
@@ -93,12 +92,11 @@ export default function MonitorGcRemainingScreen() {
     updateInput(gc, String(clampThreshold(current + delta)));
   };
 
-  const withSaving = async (gc: number, fn: () => Promise<void>) => {
+  const withSaving = async <T,>(gc: number, fn: () => Promise<T>): Promise<T> => {
     const key = String(gc);
     setSavingGc((prev) => ({ ...prev, [key]: true }));
     try {
-      await fn();
-      await refresh();
+      return await fn();
     } finally {
       setSavingGc((prev) => ({ ...prev, [key]: false }));
     }
@@ -108,12 +106,18 @@ export default function MonitorGcRemainingScreen() {
     const key = String(gc);
     const threshold = clampThreshold(thresholdInputs[key]);
     try {
-      await withSaving(gc, async () => {
-        await saveGcRule(gc, {
+      const saved = await withSaving(gc, async () => {
+        return saveGcRule(gc, {
           enabled: true,
           threshold,
         });
       });
+      setData((previous) =>
+        previous
+          ? { ...previous, monitors: saved }
+          : { monitors: saved, latestCapturedAt: null, latestItems: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert(`GC${gc} save failed`, (err as Error).message);
     }
@@ -121,9 +125,15 @@ export default function MonitorGcRemainingScreen() {
 
   const onCancel = async (gc: number) => {
     try {
-      await withSaving(gc, async () => {
-        await saveGcRule(gc, { enabled: false });
+      const saved = await withSaving(gc, async () => {
+        return saveGcRule(gc, { enabled: false });
       });
+      setData((previous) =>
+        previous
+          ? { ...previous, monitors: saved }
+          : { monitors: saved, latestCapturedAt: null, latestItems: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert(`GC${gc} save failed`, (err as Error).message);
     }
@@ -131,6 +141,7 @@ export default function MonitorGcRemainingScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
 import EventSource from "react-native-sse";
 import { API_URLS } from "../lib/config";
 
@@ -14,6 +15,7 @@ interface RefreshOptions {
 
 export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
   const { pollMs, immediate = true, liveSources } = options;
+  const isFocused = useIsFocused();
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,15 +59,15 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
   );
 
   useEffect(() => {
-    if (!immediate) {
+    if (!immediate || !isFocused) {
       setLoading(false);
       return;
     }
     void refresh();
-  }, [immediate, refresh]);
+  }, [immediate, isFocused, refresh]);
 
   useEffect(() => {
-    if (!pollMs || pollMs <= 0) {
+    if (!isFocused || !pollMs || pollMs <= 0) {
       return;
     }
 
@@ -76,10 +78,10 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
     return () => {
       clearInterval(timer);
     };
-  }, [pollMs, refresh]);
+  }, [isFocused, pollMs, refresh]);
 
   useEffect(() => {
-    if (!liveSources?.length) {
+    if (!isFocused || !liveSources?.length) {
       return;
     }
 
@@ -108,7 +110,7 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
       es.removeEventListener("source_updated" as any, onSourceUpdated as any);
       es.close();
     };
-  }, [liveSourceKey, liveSources, refresh]);
+  }, [isFocused, liveSourceKey, liveSources, refresh]);
 
   return {
     data,

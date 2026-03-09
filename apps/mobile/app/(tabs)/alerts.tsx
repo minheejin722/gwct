@@ -1,9 +1,11 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import EventSource from "react-native-sse";
+import { useHeaderScrollToTop } from "../../hooks/useHeaderScrollToTop";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { API_URLS } from "../../lib/config";
 import { useAppPreferences } from "../../lib/appPreferences";
+import { fetchJson } from "../../lib/fetchJson";
 
 type EventFilter = "all" | "yt" | "stopReason" | "loginChange" | "weather";
 
@@ -83,6 +85,7 @@ function fmtTime(value: string): string {
 export default function AlertsScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
+  const scrollRef = useRef<ScrollView | null>(null);
   const [filter, setFilter] = useState<EventFilter>("all");
   const [clearing, setClearing] = useState(false);
   const { data, loading, error, refresh, setData } = useEndpoint<EventsResponse>(`${API_URLS.events}?limit=200`, {
@@ -96,11 +99,7 @@ export default function AlertsScreen() {
   const clearEventLogs = useCallback(async () => {
     setClearing(true);
     try {
-      const response = await fetch(API_URLS.events, { method: "DELETE" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      await response.json();
+      await fetchJson(API_URLS.events, { method: "DELETE" });
       setData({ count: 0, items: [] });
     } catch (err) {
       Alert.alert("삭제 실패", `이벤트 로그 삭제 중 오류가 발생했습니다: ${(err as Error).message}`);
@@ -139,8 +138,11 @@ export default function AlertsScreen() {
     };
   }, [setData]);
 
+  useHeaderScrollToTop(["alerts"], scrollRef);
+
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
@@ -184,7 +186,7 @@ export default function AlertsScreen() {
           <Text style={styles.summary}>{item.title}</Text>
           <Text style={styles.message}>{item.message}</Text>
           {item.type === "yt_unit_status_changed" ? (
-              <>
+            <>
               <Text style={styles.debug}>YT: {item.payload?.ytNo || "-"}</Text>
               <Text style={styles.debug}>Cabin: {item.payload?.driverName || "-"}</Text>
               <Text style={styles.debug}>

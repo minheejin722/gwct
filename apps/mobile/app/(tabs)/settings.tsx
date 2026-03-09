@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import type { ThemeMode } from "@gwct/shared";
+import { useHeaderScrollToTop } from "../../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../../lib/appPreferences";
 
 const themeOptions: Array<{ mode: ThemeMode; title: string; subtitle: string }> = [
@@ -32,8 +33,10 @@ export default function SettingsScreen() {
     setThemeMode,
   } = useAppPreferences();
   const [savingKey, setSavingKey] = useState<"alerts" | "banner" | "theme" | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const styles = createStyles(colors);
+  useHeaderScrollToTop(["settings"], scrollRef);
 
   const updateAlerts = async (next: boolean) => {
     setSavingKey("alerts");
@@ -72,7 +75,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView ref={scrollRef} style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.heroCard}>
         <Text style={styles.heroTitle}>App Settings</Text>
         <Text style={styles.heroText}>

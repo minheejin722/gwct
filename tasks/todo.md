@@ -2742,3 +2742,299 @@
 - Tradeoff:
   - This materially reduces lag, but it is still not mathematically guaranteed to stay under 2 seconds in every case because the upstream websites themselves can take `1~2.6s` to respond and parse. The new setup is designed to push the app close to the scrape completion time without making the server poll blindly every few hundred milliseconds.
   - If even tighter behavior is needed after observing this in production, the next structural optimization would be to deduplicate shared-page fetches like `gwct_work_status` and `gwct_gc_remaining`, which currently hit the same GWCT `m=F&s=A` page separately.
+
+## Save/Delete Spinner Investigation Plan (2026-03-10)
+- [x] Inspect the mobile delete/save flows that showed indefinite loading and compare them against the recent live-refresh changes.
+- [x] Measure local API latency for the affected routes to separate server processing cost from client-side refresh contention.
+- [x] Implement the safest fix:
+  - stop hidden screens from continuing live SSE/poll refresh work
+  - add request timeouts for destructive/save actions
+  - stop tying button spinners to a follow-up refresh round-trip when the mutation itself already succeeded
+- [x] Run verification and document the findings.
+
+## Save/Delete Spinner Investigation Review
+- Root cause:
+  - The save/delete routes themselves were not slow locally. Measured against the running server:
+    - `GET /api/monitors/equipment`: avg about `24.7ms`
+    - `POST /api/monitors/equipment`: avg about `24.4ms`
+    - `DELETE /api/events`: avg about `25ms`
+  - That means the "infinite saving/clearing" symptom was unlikely to be caused by the DB delete or monitor-setting write itself.
+  - The more plausible regression came from the recent live-refresh tightening:
+    - `useEndpoint` was opening SSE subscriptions and poll timers for every mounted screen, not just the currently visible one.
+    - In a tab-based app, visited screens can stay mounted, so hidden screens could keep refreshing in the background.
+    - Mutation buttons were also awaiting a follow-up `refresh()` round-trip before clearing their spinner, so any network stall after the successful `POST` could make the UI look stuck.
+- Implementation:
+  - Updated [apps/mobile/hooks/useEndpoint.ts](C:/coding/gwct/apps/mobile/hooks/useEndpoint.ts) to activate polling and `source_updated` SSE refresh only while the screen is focused.
+  - Added [apps/mobile/lib/fetchJson.ts](C:/coding/gwct/apps/mobile/lib/fetchJson.ts) so save/delete actions now fail fast with a timeout instead of waiting indefinitely on a hanging request.
+  - Updated the affected mutation flows to:
+    - clear their spinner when the mutation response returns
+    - update local screen state optimistically with `setData(...)`
+    - run the follow-up refresh in the background with `void refresh({ silent: true })`
+  - Applied that to:
+    - [apps/mobile/app/(tabs)/alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx)
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+    - [apps/mobile/app/monitor-yeosu.tsx](C:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx)
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - Local route timing checks via `Invoke-WebRequest` for:
+    - `GET /api/monitors/equipment`
+    - `POST /api/monitors/equipment`
+    - `DELETE /api/events`
+
+## Monitoring Settings Freeze Plan (2026-03-10)
+- [x] Inspect the monitor setting screens and confirm whether polling/live SSE refresh is still active while the user edits values.
+- [x] Disable live refresh on the monitor setting screens so they only load when entered/focused and otherwise keep the current draft stable.
+- [x] Run verification and document the outcome.
+
+## Monitoring Settings Freeze Review
+- Root cause:
+  - The monitor setting screens were still using `pollMs` and `liveSources` via `useEndpoint(...)`.
+  - That meant focused setting screens kept receiving server-originated refreshes while the user was typing, so local draft input state could be overwritten by the last saved server value.
+- Implementation:
+  - Removed `pollMs` and `liveSources` from:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+    - [apps/mobile/app/monitor-yeosu.tsx](C:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx)
+  - These screens now fetch once when entered/focused through the default `useEndpoint` behavior and otherwise keep the draft stable until the user manually refreshes or saves.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tactile Feedback Restoration Plan (2026-03-10)
+- [x] Inspect the shared tactile button component to confirm whether the current effect became too subtle after removing vertical movement.
+- [x] Restore a clearly visible but stable press effect for shared monitoring buttons without bringing back the awkward screen-wobble motion.
+- [x] Run verification and document the result.
+
+## Tactile Feedback Restoration Review
+- Root cause:
+  - After removing vertical travel from the shared tactile button, the remaining feedback was only a modest scale change plus a softer shadow.
+  - On small controls like `+/-`, `Confirm`, `Enable`, that remaining motion was too subtle and could read as if the press effect had disappeared.
+- Implementation:
+  - Updated [apps/mobile/components/TactilePressable.tsx](C:/coding/gwct/apps/mobile/components/TactilePressable.tsx) so the shared press effect is more visible again without reintroducing the awkward vertical wobble:
+    - stronger press-in scale
+    - brief pressed opacity dimming
+    - same anchored position, with the lighter pressed shadow retained
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Dynamic GWCT Cadence Plan (2026-03-10)
+- [x] Inspect the current GWCT source cadence, scheduler behavior, and available parser fields for schedule/work/equipment pages.
+- [x] Implement a conservative early-off-duty cadence governor that relaxes GWCT scraping only when schedule, work, and equipment all indicate the shift has effectively ended, and restores fast mode on login activity or shift boundary.
+- [x] Add regression coverage for the governor and scheduler integration, then run targeted verification.
+
+## Dynamic GWCT Cadence Review
+- Goal:
+  - Reduce unnecessary GWCT scrape pressure during proven early-off-duty windows without giving up fast refresh during real operations or shift handoff periods.
+- Implementation:
+  - Added [apps/server/src/services/scrapeCadence/governor.ts](C:/coding/gwct/apps/server/src/services/scrapeCadence/governor.ts), an in-memory cadence governor that watches three signals:
+    - schedule list: first yellow row must exist after at least one completed green row, and its ETA must still be at least `90분` away
+    - work status: the summary table must show only zero-progress rows whose ETA is still at least `90분` away
+    - equipment status: tracked operational equipment (`GC`, `LEASE`, `REPAIR`, `RS`, `TC`, `TH`, `YT`) must be effectively idle, with at most `2` normal logins and a stable idle observation streak
+- When all three line up, the governor switches the relevant GWCT sources into a relaxed cadence:
+  - `gwct_schedule_list`: `15s`
+  - `gwct_work_status`: `15s`
+  - `gwct_gc_remaining`: `15s`
+  - `gwct_equipment_status`: `15s`
+  - Any newly appearing normal login while relaxed immediately restores fast mode and holds it until the next shift boundary so the system does not bounce back into relaxed mode on the same quiet-looking stale data.
+  - Shift boundary (`06:45` / `18:45` KST) also forces a return to fast mode and clears the prior quiet signals so the next cycle starts from fresh observations.
+  - Wired the governor into:
+    - [apps/server/src/services/monitorService.ts](C:/coding/gwct/apps/server/src/services/monitorService.ts)
+    - [apps/server/src/services/scheduler.ts](C:/coding/gwct/apps/server/src/services/scheduler.ts)
+    - [apps/server/src/runtime.ts](C:/coding/gwct/apps/server/src/runtime.ts)
+  - Extended [apps/server/src/parsers/gwct.ts](C:/coding/gwct/apps/server/src/parsers/gwct.ts) to preserve the count of preceding completed green rows in the watched schedule row metadata, so the governor can distinguish "real completed work before a future yellow row" from a plain first yellow row at the top.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/scrape-cadence-governor.test.ts tests/scheduler.test.ts tests/monitor-service-eta-adjustment.test.ts`
+  - `npm.cmd run typecheck`
+
+## Dynamic GWCT Cadence Tuning Plan (2026-03-10)
+- [x] Re-check the relaxed cadence values against the user's clarified "near sleep mode" expectation.
+- [x] Raise the relaxed GWCT cadence to 10 minutes and ensure the scheduler still wakes by the next shift boundary instead of oversleeping past 06:45 or 18:45.
+- [x] Update regression coverage and verification notes.
+
+## Dynamic GWCT Cadence Tuning Review
+- Adjustment:
+  - Raised the relaxed cadence for the managed GWCT sources from `15s` to `10m`, effectively treating the confirmed early-off-duty window as a near-sleep mode.
+  - Applied uniformly to:
+    - `gwct_schedule_list`
+    - `gwct_work_status`
+    - `gwct_gc_remaining`
+    - `gwct_equipment_status`
+- Safety guard:
+  - Even in relaxed mode, the governor now caps the next delay to the upcoming shift boundary. That means the scheduler will not oversleep past `06:45` or `18:45`; if the next 10-minute slot would cross the boundary, it wakes at the boundary instead and the cadence can revert to fast.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/scrape-cadence-governor.test.ts tests/scheduler.test.ts`
+  - `npm.cmd run typecheck`
+
+## Tactile Rebound Plan (2026-03-10)
+- [x] Re-check the shared monitoring button tactile component against the user's note that the springy rebound feel has disappeared.
+- [x] Restore a visible rebound on release so monitor buttons feel like they compress and lightly pop back, without bringing back the awkward full-screen vertical wobble.
+- [x] Run mobile typecheck and document the adjustment.
+
+## Tactile Rebound Review
+- Root cause:
+  - The shared monitoring buttons still compressed on press, but after the earlier cleanup they no longer had a visible release rebound. That made the controls feel flat compared with the older springier interaction.
+- Implementation:
+  - Updated [apps/mobile/components/TactilePressable.tsx](C:/coding/gwct/apps/mobile/components/TactilePressable.tsx) so release now uses a two-stage scale animation:
+    - compress on press-in
+    - lightly overshoot above `1.0` on release
+    - settle back to rest with a controlled spring
+  - Kept the element anchored in place, so the prior awkward screen-wobble / vertical bob effect does not return.
+  - Added `stopAnimation()` before each new press phase so repeated taps do not stack stale spring motion.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Keyboard Bounce Plan (2026-03-10)
+- [x] Inspect the monitoring numeric submit paths and confirm that `search` currently reuses the same confirm logic as button taps, with no separate screen-level success feedback.
+- [x] Add a reusable screen bounce effect for monitoring pages and trigger it only after successful numeric saves initiated via keyboard `search`.
+- [x] Run mobile typecheck and document the adjustment.
+
+## Monitoring Keyboard Bounce Review
+- Root cause:
+  - The numeric monitoring inputs already used the keyboard `search` action to call the same save path as the visible `Confirm` button, so there was no way to give keyboard-submit its own screen-level success feedback.
+- Implementation:
+  - Added [apps/mobile/hooks/useScreenBounce.ts](C:/coding/gwct/apps/mobile/hooks/useScreenBounce.ts), a reusable animated `translateY` bounce hook for a brief up/down screen response.
+  - Applied it only to monitoring screens with numeric keyboard submit:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+  - The bounce is triggered only after a successful save that came from `onSubmitEditing` with the keyboard `search` key. Button taps (`Confirm`, `Cancel`, `Enable`, `Disable`, `+/-`) do not trigger this screen movement.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Keyboard Bounce Tuning Plan (2026-03-10)
+- [x] Re-check the current keyboard-submit bounce amplitude after the user reported that it still feels too subtle.
+- [x] Increase the screen-bounce travel and rebound so keyboard `search` saves feel closer to the earlier visible wobble, while keeping button-tap behavior unchanged.
+- [x] Run mobile typecheck and document the tuning.
+
+## Monitoring Keyboard Bounce Tuning Review
+- Adjustment:
+  - Tuned [apps/mobile/hooks/useScreenBounce.ts](C:/coding/gwct/apps/mobile/hooks/useScreenBounce.ts) to use a stronger multi-stage wobble on successful keyboard `search` submits:
+    - higher upward lift
+    - deeper downward rebound
+    - one extra settling oscillation before returning to rest
+  - Scope remains unchanged: this stronger wobble still applies only to successful numeric keyboard-submit saves on the monitoring pages, not to ordinary button taps.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Bounce Snap Plan (2026-03-10)
+- [x] Re-check the tuned keyboard-submit bounce after the user said it still feels too loose and teasing.
+- [x] Replace the loose wobble with a single stronger upward snap and direct settle, while keeping the trigger limited to successful keyboard `search` submits.
+- [x] Run mobile typecheck and document the retuning.
+
+## Monitoring Bounce Snap Review
+- Adjustment:
+  - Simplified [apps/mobile/hooks/useScreenBounce.ts](C:/coding/gwct/apps/mobile/hooks/useScreenBounce.ts) from a teasing multi-step wobble into a stronger two-step snap:
+    - one large upward kick
+    - direct spring return to rest
+  - This makes the reaction read as a decisive screen pop instead of a loose oscillation.
+- Scope:
+  - Trigger scope is unchanged. It still runs only on successful numeric keyboard `search` submits in the monitoring screens.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Value Change Animation Plan (2026-03-10)
+- [x] Re-check the current Monitoring numeric-save feedback after the user clarified they want the value-change action itself to animate, not the whole screen.
+- [x] Remove the screen-level bounce from the numeric Monitoring screens and attach a local pulse animation to the numeric input controls when their values change.
+- [x] Delete the now-unused screen-bounce hook, run mobile typecheck, and document the result.
+
+## Monitoring Value Change Animation Review
+- Root cause:
+  - The prior implementation interpreted the request as a screen-level save wobble on keyboard submit. That left the actual number field static while the whole page moved, which does not match "숫자를 바꿨을 시에 액션 애니메이션".
+- Implementation:
+  - Added [apps/mobile/components/ValueChangePulseView.tsx](C:/coding/gwct/apps/mobile/components/ValueChangePulseView.tsx) as a reusable local pulse wrapper for changing numeric controls.
+  - Updated the Monitoring numeric editors to animate the input itself whenever its value changes through typing or `+/-` stepping:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+  - Removed the old screen-bounce path entirely by deleting [apps/mobile/hooks/useScreenBounce.ts](C:/coding/gwct/apps/mobile/hooks/useScreenBounce.ts).
+- Verification:
+  - `rg -n "useScreenBounce|triggerBounce|Animated\\.View" apps/mobile`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Monitoring Tactile And Tab Reselect Plan (2026-03-10)
+- [x] Roll back the just-added numeric input pulse, since the user rejected animating the input control itself.
+- [x] Strengthen monitoring button tactile feedback so button taps feel closer to pressure-touch / 3D-touch feedback without reintroducing screen-level wobble.
+- [x] Add double-tap on the bottom `Work` and `Status` tabs to scroll those screens back to the top.
+- [x] Run mobile typecheck and verify the old pulse path is gone.
+
+## Monitoring Tactile And Tab Reselect Review
+- Rollback:
+  - Removed the numeric input pulse wrappers from:
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+  - Deleted the abandoned local input-pulse helper [apps/mobile/components/ValueChangePulseView.tsx](C:/coding/gwct/apps/mobile/components/ValueChangePulseView.tsx).
+- Tactile adjustment:
+  - Retuned [apps/mobile/components/TactilePressable.tsx](C:/coding/gwct/apps/mobile/components/TactilePressable.tsx) so monitoring buttons compress harder, dim a bit more while pressed, flatten their shadow more aggressively, and pop back faster on release.
+- Double-tap scroll-to-top:
+  - Added a small tab reselect event bridge in [apps/mobile/lib/tabScrollToTop.ts](C:/coding/gwct/apps/mobile/lib/tabScrollToTop.ts).
+  - Wired the custom bottom tab button in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx) to detect a focused-tab double tap on `worktime` and `status-tab`.
+  - Registered scroll-to-top handlers in:
+    - [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx)
+    - [apps/mobile/app/equipment.tsx](C:/coding/gwct/apps/mobile/app/equipment.tsx)
+- Verification:
+  - `rg -n "ValueChangePulseView|useScreenBounce|triggerBounce" apps/mobile`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Tab Reselect Fix Plan (2026-03-10)
+- [x] Re-check why the newly added Work/Status double-tap scroll-to-top path is not firing on device.
+- [x] Replace the fragile custom button `onPress` detection with router-level `tabPress` reselect handling, while keeping the scroll bridge in the screens.
+- [x] Run mobile typecheck and document the fix.
+
+## Tab Reselect Fix Review
+- Root cause:
+  - The first implementation tried to infer tab reselects from the custom `tabBarButton` press handler and its `accessibilityState`. In Expo Router tabs that is not the most reliable source of truth for focused-tab reselect behavior, so the double-tap path could fail even though the screen-side scroll subscription was correct.
+- Implementation:
+  - Kept the screen-side scroll bridge in:
+    - [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx)
+    - [apps/mobile/app/equipment.tsx](C:/coding/gwct/apps/mobile/app/equipment.tsx)
+  - Moved the double-tap detection to router-level `tabPress` listeners in [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx), which now:
+    - tracks reselect timing for `worktime` and `status-tab`
+    - clears the reselect window on other tabs
+    - emits scroll-to-top only when the already-focused Work/Status tab is tapped twice within the reselect window
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Header Scroll-To-Top Plan (2026-03-10)
+- [x] Confirm that the requested `YT Count` scroll-to-top interaction is on the stack header title, not the bottom tab bar.
+- [x] Add a header-title double-tap path for the `yt` screen and wire it to the screen scroll ref.
+- [x] Run mobile typecheck and document the result.
+
+## YT Header Scroll-To-Top Review
+- Implementation:
+  - Added a small header-level scroll bridge in [apps/mobile/lib/headerScrollToTop.ts](C:/coding/gwct/apps/mobile/lib/headerScrollToTop.ts).
+  - Replaced the plain `yt` screen title in [apps/mobile/app/_layout.tsx](C:/coding/gwct/apps/mobile/app/_layout.tsx) with a pressable custom header title that detects a quick second tap and emits `scroll-to-top` for the `yt` route.
+  - Registered the `yt` screen itself to listen and scroll its `ScrollView` to the top in [apps/mobile/app/yt.tsx](C:/coding/gwct/apps/mobile/app/yt.tsx).
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Global Header Scroll-To-Top Plan (2026-03-10)
+- [x] Expand the one-off `YT Count` header double-tap behavior into a shared pattern for all scrollable screens with visible header titles.
+- [x] Generalize the header scroll bridge and wire the stack/tab header titles through a shared double-tap title component.
+- [x] Connect each scrollable screen to the new header route key and run mobile typecheck.
+
+## Global Header Scroll-To-Top Review
+- Implementation:
+  - Generalized [apps/mobile/lib/headerScrollToTop.ts](C:/coding/gwct/apps/mobile/lib/headerScrollToTop.ts) from a `yt`-only bridge into a generic route-keyed header double-tap emitter.
+  - Added [apps/mobile/components/HeaderScrollTitle.tsx](C:/coding/gwct/apps/mobile/components/HeaderScrollTitle.tsx) and [apps/mobile/hooks/useHeaderScrollToTop.ts](C:/coding/gwct/apps/mobile/hooks/useHeaderScrollToTop.ts) so header titles and scroll screens use the same path everywhere.
+  - Applied header-title double-tap scroll-to-top to the visible-title routes in:
+    - [apps/mobile/app/_layout.tsx](C:/coding/gwct/apps/mobile/app/_layout.tsx)
+    - [apps/mobile/app/(tabs)/_layout.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/_layout.tsx)
+  - Connected the scrollable screens to their route keys, including shared components that serve both tab and stack routes:
+    - [apps/mobile/app/vessels.tsx](C:/coding/gwct/apps/mobile/app/vessels.tsx)
+    - [apps/mobile/app/cranes.tsx](C:/coding/gwct/apps/mobile/app/cranes.tsx)
+    - [apps/mobile/app/equipment.tsx](C:/coding/gwct/apps/mobile/app/equipment.tsx)
+    - [apps/mobile/app/yt.tsx](C:/coding/gwct/apps/mobile/app/yt.tsx)
+    - [apps/mobile/app/weather.tsx](C:/coding/gwct/apps/mobile/app/weather.tsx)
+    - [apps/mobile/app/monitor.tsx](C:/coding/gwct/apps/mobile/app/monitor.tsx)
+    - [apps/mobile/app/monitor-gwct-eta.tsx](C:/coding/gwct/apps/mobile/app/monitor-gwct-eta.tsx)
+    - [apps/mobile/app/monitor-gc-remaining.tsx](C:/coding/gwct/apps/mobile/app/monitor-gc-remaining.tsx)
+    - [apps/mobile/app/monitor-equipment.tsx](C:/coding/gwct/apps/mobile/app/monitor-equipment.tsx)
+    - [apps/mobile/app/monitor-yeosu.tsx](C:/coding/gwct/apps/mobile/app/monitor-yeosu.tsx)
+    - [apps/mobile/app/(tabs)/worktime.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/worktime.tsx)
+    - [apps/mobile/app/(tabs)/settings.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/settings.tsx)
+    - [apps/mobile/app/(tabs)/alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx)
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`

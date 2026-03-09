@@ -4,7 +4,9 @@ import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Animated, GestureResponderEvent, Pressable, StyleSheet } from "react-native";
+import { HeaderScrollTitle } from "../../components/HeaderScrollTitle";
 import { useAppPreferences } from "../../lib/appPreferences";
+import { emitTabScrollToTop } from "../../lib/tabScrollToTop";
 
 type TabIconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -21,6 +23,40 @@ const TAB_ICONS: Record<string, TabIconConfig> = {
   "status-tab": { active: "construct", inactive: "construct-outline", size: 24 },
   settings: { active: "settings", inactive: "settings-outline", size: 24 },
 };
+
+const TAB_TITLES: Record<string, string> = {
+  index: "Home",
+  "monitor-tab": "Monitoring",
+  worktime: "Work",
+  "status-tab": "Status",
+  settings: "Settings",
+  alerts: "Events",
+};
+
+const TAB_RESELECT_WINDOW_MS = 340;
+
+let lastScrollableTabTap: { routeName: "worktime" | "status-tab" | null; at: number } = {
+  routeName: null,
+  at: 0,
+};
+
+function handleScrollableTabPress(routeName: string, focused: boolean) {
+  const isScrollableTab = routeName === "worktime" || routeName === "status-tab";
+  const now = Date.now();
+
+  if (focused && isScrollableTab) {
+    if (lastScrollableTabTap.routeName === routeName && now - lastScrollableTabTap.at <= TAB_RESELECT_WINDOW_MS) {
+      emitTabScrollToTop(routeName);
+      lastScrollableTabTap = { routeName: null, at: 0 };
+      return;
+    }
+
+    lastScrollableTabTap = { routeName, at: now };
+    return;
+  }
+
+  lastScrollableTabTap = { routeName: null, at: 0 };
+}
 function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
   return StyleSheet.create({
     tabButton: {
@@ -155,6 +191,10 @@ export default function TabLayout() {
           backgroundColor: colors.screenBackground,
         },
         tabBarLabelStyle: styles.tabBarLabel,
+        headerTitle:
+          route.name === "index"
+            ? undefined
+            : () => <HeaderScrollTitle routeKey={route.name} title={TAB_TITLES[route.name] || route.name} color={colors.primaryText} />,
         tabBarButton: (props) => <TabBarButton {...props} colors={colors} />,
         tabBarIcon: buildTabIcon(TAB_ICONS[route.name] || TAB_ICONS.index),
       })}
@@ -165,6 +205,11 @@ export default function TabLayout() {
           title: "Home",
           headerShown: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            handleScrollableTabPress("index", navigation.isFocused());
+          },
+        })}
       />
 
       <Tabs.Screen
@@ -176,6 +221,11 @@ export default function TabLayout() {
           headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
           headerShadowVisible: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            handleScrollableTabPress("monitor-tab", navigation.isFocused());
+          },
+        })}
       />
 
       <Tabs.Screen
@@ -187,6 +237,11 @@ export default function TabLayout() {
           headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
           headerShadowVisible: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            handleScrollableTabPress("worktime", navigation.isFocused());
+          },
+        })}
       />
 
       <Tabs.Screen
@@ -198,6 +253,11 @@ export default function TabLayout() {
           headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
           headerShadowVisible: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            handleScrollableTabPress("status-tab", navigation.isFocused());
+          },
+        })}
       />
 
       <Tabs.Screen
@@ -209,6 +269,11 @@ export default function TabLayout() {
           headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },
           headerShadowVisible: false,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            handleScrollableTabPress("settings", navigation.isFocused());
+          },
+        })}
       />
 
       <Tabs.Screen

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -10,8 +10,10 @@ import {
 } from "react-native";
 import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { fetchJson } from "../lib/fetchJson";
 import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface EquipmentMonitorResponse {
@@ -33,6 +35,18 @@ interface EquipmentMonitorResponse {
     loginTime: string | null;
     stopReason: string | null;
   }>;
+}
+
+interface EquipmentMonitorSaveResponse {
+  yt: {
+    enabled: boolean;
+    threshold: number;
+    stateInitialized: boolean;
+    state: "NORMAL" | "LOW" | null;
+  };
+  gcStaff: {
+    enabled: boolean;
+  };
 }
 
 function clampThreshold(value: unknown): number {
@@ -61,15 +75,11 @@ function formatCapturedAt(value: string | null): string {
 }
 
 async function saveEquipmentConfig(payload: Record<string, unknown>) {
-  const response = await fetch(API_URLS.monitorEquipment, {
+  return fetchJson<EquipmentMonitorSaveResponse>(API_URLS.monitorEquipment, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
 }
 
 function statusText(enabled: boolean): string {
@@ -79,10 +89,8 @@ function statusText(enabled: boolean): string {
 export default function MonitorEquipmentScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
-  const { data, loading, error, refresh } = useEndpoint<EquipmentMonitorResponse>(API_URLS.monitorEquipment, {
-    pollMs: 5000,
-    liveSources: ["gwct_equipment_status"],
-  });
+  const { data, loading, error, refresh, setData } = useEndpoint<EquipmentMonitorResponse>(API_URLS.monitorEquipment);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const [ytInput, setYtInput] = useState("25");
   const [savingYt, setSavingYt] = useState(false);
@@ -103,6 +111,7 @@ export default function MonitorEquipmentScreen() {
       stopFlagged: rows.filter((row) => Boolean(row.stopReason)).length,
     };
   }, [data?.gcStates]);
+  useHeaderScrollToTop(["monitor-equipment"], scrollRef);
 
   const stepYt = (delta: number) => {
     const next = clampThreshold(Number(ytInput) + delta);
@@ -113,13 +122,18 @@ export default function MonitorEquipmentScreen() {
     const threshold = clampThreshold(ytInput);
     setSavingYt(true);
     try {
-      await saveEquipmentConfig({
+      const saved = await saveEquipmentConfig({
         yt: {
           enabled: true,
           threshold,
         },
       });
-      await refresh();
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : { ...saved, latestCapturedAt: null, ytCount: 0, gcStates: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -130,12 +144,17 @@ export default function MonitorEquipmentScreen() {
   const onCancelYt = async () => {
     setSavingYt(true);
     try {
-      await saveEquipmentConfig({
+      const saved = await saveEquipmentConfig({
         yt: {
           enabled: false,
         },
       });
-      await refresh();
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : { ...saved, latestCapturedAt: null, ytCount: 0, gcStates: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -146,8 +165,13 @@ export default function MonitorEquipmentScreen() {
   const setGcStaffEnabled = async (enabled: boolean) => {
     setSavingGcStaff(true);
     try {
-      await saveEquipmentConfig({ gcStaff: { enabled } });
-      await refresh();
+      const saved = await saveEquipmentConfig({ gcStaff: { enabled } });
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : { ...saved, latestCapturedAt: null, ytCount: 0, gcStates: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -157,6 +181,7 @@ export default function MonitorEquipmentScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}

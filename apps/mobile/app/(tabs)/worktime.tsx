@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { YTWorkSessionResponse, YTSemanticState, YTWorkShiftIndicator } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../../lib/appPreferences";
 import { API_URLS } from "../../lib/config";
+import { subscribeTabScrollToTop } from "../../lib/tabScrollToTop";
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -83,6 +85,7 @@ function StatusShape({
 export default function WorkTimeScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { data, loading, error, refresh } = useEndpoint<YTWorkSessionResponse>(API_URLS.ytWorkTime, {
     pollMs: 5000,
     liveSources: ["gwct_equipment_status"],
@@ -92,8 +95,16 @@ export default function WorkTimeScreen() {
   const drivers = session?.drivers || [];
   const shiftStatus = data?.shiftStatus || buildFallbackShiftStatus();
 
+  useEffect(() => {
+    return subscribeTabScrollToTop("worktime", () => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+  }, []);
+  useHeaderScrollToTop(["worktime"], scrollRef);
+
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}

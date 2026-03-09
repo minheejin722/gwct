@@ -46,6 +46,7 @@ import {
   loadGcAssignmentState,
   saveGcAssignmentState,
 } from "./gc/assignmentStore.js";
+import type { GwctCadenceGovernor } from "./scrapeCadence/governor.js";
 
 export interface RunOptions {
   mode?: "live" | "fixture";
@@ -59,6 +60,7 @@ export class MonitorService {
     private readonly notificationService: NotificationService,
     private readonly sseHub: SseHub,
     private readonly logger: FastifyBaseLogger,
+    private readonly cadenceGovernor?: GwctCadenceGovernor,
   ) {}
 
   async runAllOnce(options: RunOptions = {}): Promise<void> {
@@ -149,6 +151,12 @@ export class MonitorService {
         source: sourceDef.source,
         capturedAt: seenAt,
         emittedEvents: events.length,
+      });
+      this.cadenceGovernor?.observe({
+        source: sourceDef.source,
+        seenAt,
+        html: fetchResult.html,
+        bundle,
       });
 
       await this.repo.finishScrapeRun(run.id, {

@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { fetchJson } from "../lib/fetchJson";
 
 interface YeosuMonitorResponse {
   enabled: boolean;
@@ -14,6 +16,13 @@ interface YeosuMonitorResponse {
   latestCapturedAt: string | null;
   latestForecastState: "none" | "partial" | "all";
   latestDutyText: string | null;
+}
+
+interface YeosuMonitorSaveResponse {
+  enabled: boolean;
+  lastRawText: string | null;
+  lastNormalizedState: "none" | "partial" | "all" | null;
+  lastChangedAt: string | null;
 }
 
 type WeatherState = YeosuMonitorResponse["latestForecastState"];
@@ -84,34 +93,39 @@ function stateTone(
 }
 
 async function saveYeosuConfig(payload: Record<string, unknown>) {
-  const response = await fetch(API_URLS.monitorYeosu, {
+  return fetchJson<YeosuMonitorSaveResponse>(API_URLS.monitorYeosu, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
 }
 
 export default function MonitorYeosuScreen() {
-  const { data, loading, error, refresh } = useEndpoint<YeosuMonitorResponse>(API_URLS.monitorYeosu, {
-    pollMs: 10000,
-    liveSources: ["ys_forecast", "ys_notice", "ys_news"],
-  });
+  const { data, loading, error, refresh, setData } = useEndpoint<YeosuMonitorResponse>(API_URLS.monitorYeosu);
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
   const [saving, setSaving] = useState(false);
 
   const liveState = data?.latestForecastState || "none";
   const liveTone = stateTone(liveState, resolvedTheme, colors);
+  useHeaderScrollToTop(["monitor-yeosu"], scrollRef);
 
   const setEnabled = async (enabled: boolean) => {
     setSaving(true);
     try {
-      await saveYeosuConfig({ enabled });
-      await refresh();
+      const saved = await saveYeosuConfig({ enabled });
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : {
+              ...saved,
+              latestCapturedAt: null,
+              latestForecastState: "none",
+              latestDutyText: null,
+            },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -121,6 +135,7 @@ export default function MonitorYeosuScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}

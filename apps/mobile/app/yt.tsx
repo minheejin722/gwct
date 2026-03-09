@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { YTUnitSnapshot } from "@gwct/shared";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 
@@ -96,6 +97,7 @@ function formatLoggedOutTime(value: string | null | undefined): string {
 export default function YtScreen() {
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { data, loading, refresh, error } = useEndpoint<YtResponse>(API_URLS.yt, {
     pollMs: 5000,
     liveSources: ["gwct_equipment_status"],
@@ -115,8 +117,11 @@ export default function YtScreen() {
     });
   }, [data?.units]);
 
+  useHeaderScrollToTop(["yt"], scrollRef);
+
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={

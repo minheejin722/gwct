@@ -13,6 +13,7 @@ import { MonitorService } from "./services/monitorService.js";
 import { Scheduler } from "./services/scheduler.js";
 import { DataRetentionService } from "./services/cleanup/service.js";
 import { CleanupScheduler } from "./services/cleanup/scheduler.js";
+import { GwctCadenceGovernor } from "./services/scrapeCadence/governor.js";
 import { registerRoutes } from "./routes/api.js";
 
 export async function createRuntime() {
@@ -33,8 +34,9 @@ export async function createRuntime() {
   const fetcher = new HtmlFetcher(browserPool);
   const provider = env.expoPushEnabled ? new ExpoPushProvider() : new NoopNotificationProvider();
   const notificationService = new NotificationService(repo, provider, sseHub);
-  const monitorService = new MonitorService(repo, fetcher, notificationService, sseHub, app.log);
-  const scheduler = new Scheduler(monitorService);
+  const cadenceGovernor = new GwctCadenceGovernor(app.log);
+  const monitorService = new MonitorService(repo, fetcher, notificationService, sseHub, app.log, cadenceGovernor);
+  const scheduler = new Scheduler(monitorService, cadenceGovernor);
   const cleanupService = new DataRetentionService(repo, app.log);
   const cleanupScheduler = new CleanupScheduler(cleanupService, app.log);
 

@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useEndpoint } from "../hooks/useEndpoint";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
@@ -65,13 +67,16 @@ function rowTone(rowColor: VesselRowColor) {
 export default function VesselsScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { data, loading, refresh } = useEndpoint<VesselsResponse>(API_URLS.vessels, {
     pollMs: 5000,
     liveSources: ["gwct_schedule_list"],
   });
+  useHeaderScrollToTop(["vessels"], scrollRef);
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}

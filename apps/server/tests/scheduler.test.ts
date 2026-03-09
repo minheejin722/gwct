@@ -67,4 +67,42 @@ describe("scheduler", () => {
 
     scheduler.stop();
   });
+
+  it("uses the cadence governor interval when scheduling the next run", async () => {
+    const { env, Scheduler } = await loadSchedulerModules();
+    env.GWCT_INTERVAL_MS = 2000;
+    env.GWCT_GC_INTERVAL_MS = 20000;
+    env.YS_INTERVAL_MS = 20000;
+    env.JITTER_MS = 0;
+
+    const starts: string[] = [];
+    const monitorService = {
+      async runSourceOnce(source: { source: string }) {
+        if (source.source !== "gwct_schedule_list") {
+          return;
+        }
+        starts.push(new Date(Date.now()).toISOString());
+      },
+    };
+    const cadenceGovernor = {
+      intervalMsFor(source: { source: string; intervalMs: number }) {
+        if (source.source !== "gwct_schedule_list") {
+          return source.intervalMs;
+        }
+        return starts.length >= 1 ? 5000 : 2000;
+      },
+    };
+
+    const scheduler = new Scheduler(monitorService as any, cadenceGovernor as any);
+    await scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(6200);
+
+    expect(starts).toEqual([
+      "2026-03-10T00:00:01.000Z",
+      "2026-03-10T00:00:06.000Z",
+    ]);
+
+    scheduler.stop();
+  });
 });

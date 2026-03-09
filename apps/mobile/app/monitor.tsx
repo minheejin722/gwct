@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
+import { useRef } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import { Link } from "expo-router";
 import { FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 
 export default function MonitorMenuScreen() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
+  const scrollRef = useRef<ScrollView | null>(null);
   const monitorCards: MonitorCardItem[] = [
     {
       href: "/monitor-gwct-eta",
@@ -37,9 +40,10 @@ export default function MonitorMenuScreen() {
       accentColor: colors.danger,
     },
   ];
+  useHeaderScrollToTop(["monitor-tab", "monitor"], scrollRef);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView ref={scrollRef} style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.heroCard}>
         <Text style={styles.heroTitle}>Monitoring Menu</Text>
         <Text style={styles.subtitle}>

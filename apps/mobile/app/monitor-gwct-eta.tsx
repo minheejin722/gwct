@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
+import { useHeaderScrollToTop } from "../hooks/useHeaderScrollToTop";
 import { useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
+import { fetchJson } from "../lib/fetchJson";
 import { sanitizeNumericInput } from "../lib/sanitizeNumericInput";
 
 interface GwctEtaMonitorResponse {
@@ -18,6 +20,12 @@ interface GwctEtaMonitorResponse {
     etaNormalized: string | null;
     rowColor: "green" | "yellow" | "cyan" | "unknown";
   }>;
+}
+
+interface GwctEtaMonitorSaveResponse {
+  enabled: boolean;
+  trackingCount: number;
+  lastChangedAt: string | null;
 }
 
 function clampTrackingCount(value: unknown): number {
@@ -92,24 +100,18 @@ function rowColorTone(
 }
 
 async function saveGwctEtaConfig(payload: Record<string, unknown>) {
-  const response = await fetch(API_URLS.monitorGwctEta, {
+  return fetchJson<GwctEtaMonitorSaveResponse>(API_URLS.monitorGwctEta, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
 }
 
 export default function MonitorGwctEtaScreen() {
-  const { data, loading, error, refresh } = useEndpoint<GwctEtaMonitorResponse>(API_URLS.monitorGwctEta, {
-    pollMs: 5000,
-    liveSources: ["gwct_schedule_list"],
-  });
+  const { data, loading, error, refresh, setData } = useEndpoint<GwctEtaMonitorResponse>(API_URLS.monitorGwctEta);
   const { colors, resolvedTheme } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors, resolvedTheme), [colors, resolvedTheme]);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const [countInput, setCountInput] = useState("11");
   const [saving, setSaving] = useState(false);
@@ -123,6 +125,7 @@ export default function MonitorGwctEtaScreen() {
 
   const parsedCount = useMemo(() => clampTrackingCount(countInput), [countInput]);
   const previewItems = (data?.preview || []).slice(0, parsedCount);
+  useHeaderScrollToTop(["monitor-gwct-eta"], scrollRef);
 
   const step = (delta: number) => {
     const next = clampTrackingCount(Number(countInput) + delta);
@@ -132,11 +135,16 @@ export default function MonitorGwctEtaScreen() {
   const onConfirm = async () => {
     setSaving(true);
     try {
-      await saveGwctEtaConfig({
+      const saved = await saveGwctEtaConfig({
         enabled: true,
         trackingCount: parsedCount,
       });
-      await refresh();
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : { ...saved, preview: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -147,8 +155,13 @@ export default function MonitorGwctEtaScreen() {
   const onCancel = async () => {
     setSaving(true);
     try {
-      await saveGwctEtaConfig({ enabled: false });
-      await refresh();
+      const saved = await saveGwctEtaConfig({ enabled: false });
+      setData((previous) =>
+        previous
+          ? { ...previous, ...saved }
+          : { ...saved, preview: [] },
+      );
+      void refresh({ silent: true });
     } catch (err) {
       Alert.alert("Save failed", (err as Error).message);
     } finally {
@@ -158,6 +171,7 @@ export default function MonitorGwctEtaScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
