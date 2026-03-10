@@ -268,6 +268,96 @@ export const YTThresholdRuleSchema = z.object({
 });
 export type YTThresholdRule = z.infer<typeof YTThresholdRuleSchema>;
 
+export const YtMasterCallRoleSchema = z.enum(["driver", "master"]);
+export type YtMasterCallRole = z.infer<typeof YtMasterCallRoleSchema>;
+
+export const YtMasterCallMasterSlotSchema = z.enum(["MASTER-1", "MASTER-2"]);
+export type YtMasterCallMasterSlot = z.infer<typeof YtMasterCallMasterSlotSchema>;
+
+export const YtMasterCallStatusSchema = z.enum(["pending", "approved", "rejected"]);
+export type YtMasterCallStatus = z.infer<typeof YtMasterCallStatusSchema>;
+
+export const YtMasterCallReasonSchema = z.enum(["tractor_inspection", "restroom", "other"]);
+export type YtMasterCallReason = z.infer<typeof YtMasterCallReasonSchema>;
+
+export const YT_MASTER_CALL_REASON_LABELS: Record<YtMasterCallReason, string> = {
+  tractor_inspection: "트랙터 점검",
+  restroom: "화장실",
+  other: "기타 사유",
+};
+
+export const YtMasterCallRegistrationSchema = z.object({
+  deviceId: z.string(),
+  role: YtMasterCallRoleSchema,
+  name: z.string(),
+  ytNumber: z.string().nullable(),
+  masterSlot: YtMasterCallMasterSlotSchema.nullable(),
+  registeredAt: z.string(),
+  updatedAt: z.string(),
+});
+export type YtMasterCallRegistration = z.infer<typeof YtMasterCallRegistrationSchema>;
+
+export const YtMasterCallQueueEntrySchema = z.object({
+  id: z.string(),
+  driverDeviceId: z.string(),
+  driverName: z.string(),
+  ytNumber: z.string(),
+  reasonCode: YtMasterCallReasonSchema,
+  reasonLabel: z.string(),
+  status: YtMasterCallStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  resolvedAt: z.string().nullable(),
+  resolvedByDeviceId: z.string().nullable(),
+  resolvedByName: z.string().nullable(),
+});
+export type YtMasterCallQueueEntry = z.infer<typeof YtMasterCallQueueEntrySchema>;
+
+export const YtMasterCallMasterAssignmentSchema = z.object({
+  slot: YtMasterCallMasterSlotSchema,
+  deviceId: z.string(),
+  name: z.string(),
+});
+export type YtMasterCallMasterAssignment = z.infer<typeof YtMasterCallMasterAssignmentSchema>;
+
+export const YtMasterCallLiveStateSchema = z.object({
+  deviceId: z.string(),
+  registration: YtMasterCallRegistrationSchema.nullable(),
+  masterAssignments: z.array(YtMasterCallMasterAssignmentSchema),
+  availableMasterSlots: z.array(YtMasterCallMasterSlotSchema),
+  currentCall: YtMasterCallQueueEntrySchema.nullable(),
+  queue: z.array(YtMasterCallQueueEntrySchema),
+  pendingCount: z.number().int().nonnegative(),
+});
+export type YtMasterCallLiveState = z.infer<typeof YtMasterCallLiveStateSchema>;
+
+export const YtMasterCallRegistrationInputSchema = z.discriminatedUnion("role", [
+  z.object({
+    deviceId: z.string(),
+    role: z.literal("driver"),
+    name: z.string().trim().min(1),
+    ytNumber: z.string().trim().min(1),
+  }),
+  z.object({
+    deviceId: z.string(),
+    role: z.literal("master"),
+    name: z.string().trim().min(1),
+  }),
+]);
+export type YtMasterCallRegistrationInput = z.infer<typeof YtMasterCallRegistrationInputSchema>;
+
+export const YtMasterCallCreateInputSchema = z.object({
+  deviceId: z.string(),
+  reasonCode: YtMasterCallReasonSchema,
+});
+export type YtMasterCallCreateInput = z.infer<typeof YtMasterCallCreateInputSchema>;
+
+export const YtMasterCallDecisionInputSchema = z.object({
+  deviceId: z.string(),
+  status: z.enum(["approved", "rejected"]),
+});
+export type YtMasterCallDecisionInput = z.infer<typeof YtMasterCallDecisionInputSchema>;
+
 export const GwctEtaDirectionSchema = z.enum(["earlier", "later"]);
 export type GwctEtaDirection = z.infer<typeof GwctEtaDirectionSchema>;
 

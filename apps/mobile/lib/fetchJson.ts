@@ -9,7 +9,16 @@ export async function fetchJson<T>(input: string, init: RequestInit = {}, timeou
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      let message = `HTTP ${response.status}`;
+      try {
+        const errorPayload = (await response.json()) as { error?: string };
+        if (typeof errorPayload.error === "string" && errorPayload.error.trim().length) {
+          message = errorPayload.error.trim();
+        }
+      } catch {
+        // Ignore non-JSON error bodies and keep the HTTP status message.
+      }
+      throw new Error(message);
     }
 
     return (await response.json()) as T;

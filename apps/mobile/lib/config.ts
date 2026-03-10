@@ -20,6 +20,14 @@ export const API_URLS = {
   monitorYeosu: `${API_BASE_URL}/api/monitors/yeosu`,
   alerts: `${API_BASE_URL}/api/alerts`,
   events: `${API_BASE_URL}/api/events`,
+  ytMasterCallLive: (deviceId: string) =>
+    `${API_BASE_URL}/api/yt-master-call/live?deviceId=${encodeURIComponent(deviceId)}`,
+  ytMasterCallRegister: `${API_BASE_URL}/api/yt-master-call/register`,
+  ytMasterCallClear: (deviceId: string) =>
+    `${API_BASE_URL}/api/yt-master-call/register/${encodeURIComponent(deviceId)}`,
+  ytMasterCallCalls: `${API_BASE_URL}/api/yt-master-call/calls`,
+  ytMasterCallDecision: (callId: string) =>
+    `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}/decision`,
   registerDevice: `${API_BASE_URL}/api/devices/register`,
   updateSettings: (deviceId: string) => `${API_BASE_URL}/api/settings/device/${encodeURIComponent(deviceId)}`,
   sse: `${API_BASE_URL}/api/stream/events`,

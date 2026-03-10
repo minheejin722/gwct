@@ -29,6 +29,13 @@ function extractEventId(value: unknown): string | null {
   return trimmed.length ? trimmed : null;
 }
 
+function extractForcePresentation(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return (value as Record<string, unknown>).forcePresentation === true;
+}
+
 export function rememberAlertEvent(eventId: string): boolean {
   const now = Date.now();
   pruneSeenAlertEvents(now);
@@ -57,6 +64,7 @@ export function configureNotificationPresentation(input: {
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const eventId = extractEventId(notification.request.content.data);
+    const forcePresentation = extractForcePresentation(notification.request.content.data);
     if (eventId && !rememberAlertEvent(eventId)) {
       return {
         shouldShowAlert: false,
@@ -64,6 +72,16 @@ Notifications.setNotificationHandler({
         shouldSetBadge: false,
         shouldShowBanner: false,
         shouldShowList: false,
+      };
+    }
+
+    if (forcePresentation) {
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
       };
     }
 

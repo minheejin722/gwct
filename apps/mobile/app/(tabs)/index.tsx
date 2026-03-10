@@ -1,7 +1,7 @@
 import { RefreshControl, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useEffect } from "react";
-import { MaterialCommunityIcons, FontAwesome5, Feather } from "@expo/vector-icons";
+import { MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { useEndpoint } from "../../hooks/useEndpoint";
 import { useSseAlerts } from "../../hooks/useSseAlerts";
 import { useAppPreferences } from "../../lib/appPreferences";
@@ -72,14 +72,14 @@ export default function HomeScreen() {
         <View style={styles.liveCard}>
           <Text style={styles.liveTitle}>실시간 스트림</Text>
           <View style={styles.liveRow}>
-            <Text style={styles.liveLabel}>연결 상태 :</Text>
+            <Text style={styles.liveLabel}>연결 상태:</Text>
             <View style={[styles.statusDot, connected ? styles.dotConnected : styles.dotDisconnected]} />
-            <Text style={styles.liveText}>서버 {connected ? "연결중" : "끊김"}</Text>
+            <Text style={styles.liveText}>서버 {connected ? "연결중" : "대기"}</Text>
           </View>
           <View style={styles.liveRow}>
-            <Text style={styles.liveLabel}>최근 이벤트 :</Text>
+            <Text style={styles.liveLabel}>최근 이벤트:</Text>
             <Text style={styles.liveText} numberOfLines={1}>
-              {lastAlert ? `${lastAlert.title}` : "이벤트 없음"}
+              {lastAlert ? lastAlert.title : "이벤트 없음"}
             </Text>
           </View>
         </View>
@@ -120,10 +120,10 @@ export default function HomeScreen() {
             <FontAwesome5 name="ship" size={38} color={colors.icon} style={styles.linkIcon} />
           </Pressable>
         </Link>
-        <Link href="/monitor" asChild>
+        <Link href="/yt-master-call" asChild>
           <Pressable style={styles.linkCard}>
-            <Text style={styles.linkTitle}>모니터링 설정</Text>
-            <Feather name="monitor" size={40} color={colors.icon} style={styles.linkIcon} />
+            <Text style={styles.linkTitle}>반장 호출</Text>
+            <MaterialCommunityIcons name="bullhorn" size={40} color={colors.icon} style={styles.linkIcon} />
           </Pressable>
         </Link>
       </View>
@@ -133,20 +133,20 @@ export default function HomeScreen() {
           <Text style={styles.summaryTitle}>GWCT</Text>
           <View style={styles.summaryRow}>
             <FontAwesome5 name="ship" size={12} color={colors.icon} />
-            <Text style={styles.summaryText}>선박 ETA 추적 : {data?.trackedVesselCount ?? 0}</Text>
+            <Text style={styles.summaryText}>선박 ETA 추적: {data?.trackedVesselCount ?? 0}</Text>
           </View>
           <View style={styles.summaryRow}>
             <MaterialCommunityIcons name="crane" size={14} color={colors.icon} />
-            <Text style={styles.summaryText}>GC 작업중 : {data?.workingCraneCount ?? 0}</Text>
+            <Text style={styles.summaryText}>GC 작업중: {data?.workingCraneCount ?? 0}</Text>
           </View>
           <View style={styles.summaryRow}>
             <MaterialCommunityIcons name="forklift" size={14} color={colors.icon} />
-            <Text style={styles.summaryText}>야드 장비 로그인 : {data?.supportEquipmentLoginCount ?? 0}</Text>
+            <Text style={styles.summaryText}>야드 장비 로그인: {data?.supportEquipmentLoginCount ?? 0}</Text>
           </View>
           <View style={styles.summaryRow}>
             <FontAwesome5 name="user-tie" size={14} color={colors.icon} />
             <Text style={styles.summaryText}>
-              도선 상태{" "}
+              예선 상태{" "}
               <Text
                 style={{
                   color: data?.weatherState === "none" ? colors.success : colors.danger,

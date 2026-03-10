@@ -9,15 +9,32 @@ import {
   Text,
   View,
 } from "react-native";
-import type { ThemeMode } from "@gwct/shared";
+import type { ThemeMode, YtMasterCallLiveState } from "@gwct/shared";
+import { Link } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useEndpoint } from "../../hooks/useEndpoint";
 import { useHeaderScrollToTop } from "../../hooks/useHeaderScrollToTop";
+import { useLocalDeviceId } from "../../hooks/useLocalDeviceId";
 import { useAppPreferences } from "../../lib/appPreferences";
+import { API_URLS } from "../../lib/config";
 
 const themeOptions: Array<{ mode: ThemeMode; title: string; subtitle: string }> = [
   { mode: "system", title: "System", subtitle: "Follow the phone appearance setting." },
   { mode: "dark", title: "Dark", subtitle: "Use the app dark palette." },
   { mode: "light", title: "Light", subtitle: "Use the standard light palette." },
 ];
+
+function formatRoleSummary(data: YtMasterCallLiveState | null): string {
+  if (!data?.registration) {
+    return "권한 미설정";
+  }
+
+  if (data.registration.role === "master") {
+    return `${data.registration.masterSlot || "MASTER"} / ${data.registration.name}`;
+  }
+
+  return `${data.registration.ytNumber || "YT"} / ${data.registration.name}`;
+}
 
 export default function SettingsScreen() {
   const {
@@ -32,10 +49,19 @@ export default function SettingsScreen() {
     setBannerEnabled,
     setThemeMode,
   } = useAppPreferences();
+  const { deviceId, isReady: deviceReady } = useLocalDeviceId();
   const [savingKey, setSavingKey] = useState<"alerts" | "banner" | "theme" | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
-
   const styles = createStyles(colors);
+
+  const callLive = useEndpoint<YtMasterCallLiveState>(
+    deviceId ? API_URLS.ytMasterCallLive(deviceId) : API_URLS.events,
+    {
+      immediate: Boolean(deviceId),
+      liveEvents: deviceId ? ["yt_master_call_role_updated", "yt_master_call_changed"] : undefined,
+    },
+  );
+
   useHeaderScrollToTop(["settings"], scrollRef);
 
   const updateAlerts = async (next: boolean) => {
@@ -74,27 +100,38 @@ export default function SettingsScreen() {
     }
   };
 
+  const masterSlotsText = deviceReady
+    ? `${callLive.data?.masterAssignments.length ?? 0}/2 slots in use`
+    : "Loading device...";
+
   return (
     <ScrollView ref={scrollRef} style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.heroCard}>
-        <Text style={styles.heroTitle}>App Settings</Text>
-        <Text style={styles.heroText}>
-          Manage alert delivery, foreground banner behavior, and the app theme mode from this tab.
-        </Text>
-        <Text style={styles.heroMeta}>
-          Current theme: <Text style={styles.heroMetaStrong}>{resolvedTheme}</Text>
-        </Text>
-        {!isReady ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={styles.loadingText}>Loading saved device settings…</Text>
+      <Link href="/yt-master-call-settings" asChild>
+        <Pressable style={styles.roleCard}>
+          <View style={styles.roleIconWrap}>
+            <MaterialCommunityIcons name="bullhorn" size={28} color={colors.surfaceBackground} />
           </View>
-        ) : null}
-        {syncError ? <Text style={styles.errorText}>Last sync error: {syncError}</Text> : null}
-      </View>
+          <View style={styles.roleCopy}>
+            <Text style={styles.roleTitle}>YT Master Call</Text>
+            <Text style={styles.roleSubtitle}>반장 호출 권한을 설정하고 현재 사용자 역할을 관리합니다.</Text>
+            <Text style={styles.roleMeta}>{formatRoleSummary(callLive.data)}</Text>
+          </View>
+          <View style={styles.roleAside}>
+            {callLive.loading && deviceReady ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.secondaryText} />
+            )}
+            <Text style={styles.roleAsideText}>{masterSlotsText}</Text>
+          </View>
+        </Pressable>
+      </Link>
 
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Notifications</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          {!isReady ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+        </View>
         <View style={styles.settingRow}>
           <View style={styles.settingCopy}>
             <Text style={styles.settingLabel}>Alarm</Text>
@@ -129,10 +166,16 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
+
+        {syncError ? <Text style={styles.errorText}>Last sync error: {syncError}</Text> : null}
+        {callLive.error && deviceReady ? <Text style={styles.errorText}>YT Master Call sync: {callLive.error}</Text> : null}
       </View>
 
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Theme Mode</Text>
+        <Text style={styles.sectionMeta}>
+          Current theme: <Text style={styles.sectionMetaStrong}>{resolvedTheme}</Text>
+        </Text>
         <View style={styles.themeGrid}>
           {themeOptions.map((option) => {
             const selected = themeMode === option.mode;
@@ -153,7 +196,7 @@ export default function SettingsScreen() {
         {savingKey === "theme" ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={styles.loadingText}>Saving theme mode…</Text>
+            <Text style={styles.loadingText}>Saving theme mode...</Text>
           </View>
         ) : null}
       </View>
@@ -165,23 +208,59 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.screenBackground },
     content: { padding: 16, gap: 14, paddingBottom: 28 },
-    heroCard: {
+    roleCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
       backgroundColor: colors.surfaceBackground,
-      borderRadius: 16,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: colors.border,
       padding: 16,
-      gap: 8,
       shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: 3 },
       shadowOpacity: 0.08,
-      shadowRadius: 5,
-      elevation: 2,
+      shadowRadius: 6,
+      elevation: 3,
     },
-    heroTitle: { fontSize: 22, fontWeight: "800", color: colors.primaryText },
-    heroText: { fontSize: 14, lineHeight: 20, color: colors.secondaryText },
-    heroMeta: { fontSize: 13, color: colors.secondaryText },
-    heroMetaStrong: { color: colors.primaryText, fontWeight: "700" },
+    roleIconWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.badgeBackground,
+    },
+    roleCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    roleTitle: {
+      fontSize: 21,
+      fontWeight: "800",
+      color: colors.primaryText,
+    },
+    roleSubtitle: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: colors.secondaryText,
+    },
+    roleMeta: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.accent,
+      marginTop: 3,
+    },
+    roleAside: {
+      alignItems: "flex-end",
+      justifyContent: "center",
+      gap: 4,
+    },
+    roleAsideText: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.secondaryText,
+    },
     sectionCard: {
       backgroundColor: colors.surfaceBackground,
       borderRadius: 16,
@@ -195,7 +274,14 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
       shadowRadius: 5,
       elevation: 2,
     },
+    sectionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
     sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.primaryText },
+    sectionMeta: { fontSize: 13, color: colors.secondaryText },
+    sectionMetaStrong: { color: colors.primaryText, fontWeight: "700" },
     settingRow: {
       flexDirection: "row",
       alignItems: "center",

@@ -64,7 +64,21 @@ describe("schedule focus parser and eta diff", () => {
 
     expect(bundle.vessels).toHaveLength(11);
     expect(bundle.vessels[0]?.terminalVoyage).toBe("N-001");
+    expect(bundle.vessels[0]?.rawLabelMap._allRowsCyan).toBe("false");
     expect(bundle.vessels[0]?.rawLabelMap._watchStartReason).toBe("first_non_green");
+  });
+
+  it("marks watch rows when the full schedule list is all cyan", () => {
+    const cyans = Array.from({ length: 12 }, (_, i) =>
+      rowHtml("bg_yet", `A-00${i + 1}`, `ALLCYAN${i + 1}`, `2026/03/01 ${String(i + 3).padStart(2, "0")}:00`),
+    );
+
+    const html = wrapTable(cyans.join("\n"));
+    const bundle = parseGwctScheduleList(html, "2026-03-01T12:00:00.000Z", "gwct_schedule_list");
+
+    expect(bundle.vessels).toHaveLength(11);
+    expect(bundle.vessels.every((row) => row.rawLabelMap._allRowsCyan === "true")).toBe(true);
+    expect(bundle.vessels.every((row) => row.rawLabelMap._rowColor === "cyan")).toBe(true);
   });
 
   it("emits gwct_eta_changed only when same voyage ETA changes", () => {

@@ -9,6 +9,7 @@ import { HeaderScrollTitle } from "../components/HeaderScrollTitle";
 import { AppPreferencesProvider, useAppPreferences } from "../lib/appPreferences";
 import { API_URLS } from "../lib/config";
 import { resolveNotificationSound } from "../lib/notificationSound";
+import { localDeviceId } from "../lib/push";
 
 interface LiveAlertMessage {
   eventId: string;
@@ -17,10 +18,22 @@ interface LiveAlertMessage {
 }
 
 const localSseAlertsEnabled = process.env.EXPO_PUBLIC_LOCAL_SSE_ALERTS !== "false";
+const REF_CALL_HEADER = {
+  background: "#ececf1",
+  text: "#0d0d0f",
+};
 
 function AppShell() {
   const { alertsEnabled, resolvedTheme, colors } = useAppPreferences();
   const lastSeenEventIdRef = useRef<string | null>(null);
+  const lastSeenYtCallEventIdRef = useRef<string | null>(null);
+  const deviceIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    void localDeviceId().then((deviceId) => {
+      deviceIdRef.current = deviceId;
+    });
+  }, []);
 
   useEffect(() => {
     const receivedSub = Notifications.addNotificationReceivedListener(() => {
@@ -28,6 +41,42 @@ function AppShell() {
     });
 
     let es: EventSource | null = null;
+    const scheduleLocalNotification = async (
+      eventId: string,
+      title: string,
+      body: string,
+      forcePresentation = false,
+    ) => {
+      const preferredSound = resolveNotificationSound();
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title,
+            body,
+            sound: preferredSound,
+            data: {
+              eventId,
+              forcePresentation,
+            },
+          },
+          trigger: null,
+        });
+      } catch {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title,
+            body,
+            sound: "default",
+            data: {
+              eventId,
+              forcePresentation,
+            },
+          },
+          trigger: null,
+        });
+      }
+    };
+
     const onAlert = (event: { data?: string }) => {
       if (!event.data || !alertsEnabled) {
         return;
@@ -40,36 +89,45 @@ function AppShell() {
         }
 
         lastSeenEventIdRef.current = parsed.eventId;
-        const preferredSound = resolveNotificationSound();
-        const schedule = async () => {
-          try {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: parsed.title || "GWCT Alert",
-                body: parsed.message || "",
-                sound: preferredSound,
-                data: {
-                  eventId: parsed.eventId,
-                },
-              },
-              trigger: null,
-            });
-          } catch {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: parsed.title || "GWCT Alert",
-                body: parsed.message || "",
-                sound: "default",
-                data: {
-                  eventId: parsed.eventId,
-                },
-              },
-              trigger: null,
-            });
-          }
-        };
+        void scheduleLocalNotification(parsed.eventId, parsed.title || "GWCT Alert", parsed.message || "");
+      } catch {
+        // Ignore malformed payloads during hot-reload or server restart.
+      }
+    };
 
-        void schedule();
+    const onYtMasterCallResolved = (event: { data?: string }) => {
+      if (!event.data) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.data) as {
+          eventId?: string;
+          driverDeviceId?: string;
+          title?: string;
+          message?: string;
+          callId?: string;
+          status?: string;
+        };
+        const currentDeviceId = deviceIdRef.current;
+        if (!currentDeviceId || parsed.driverDeviceId !== currentDeviceId) {
+          return;
+        }
+
+        const eventId =
+          parsed.eventId ||
+          `yt_master_call:${parsed.callId || "unknown"}:${parsed.status || "updated"}`;
+        if (lastSeenYtCallEventIdRef.current === eventId) {
+          return;
+        }
+        lastSeenYtCallEventIdRef.current = eventId;
+
+        void scheduleLocalNotification(
+          eventId,
+          parsed.title || "반장 호출 상태 변경",
+          parsed.message || "반장 호출 상태가 변경되었습니다.",
+          true,
+        );
       } catch {
         // Ignore malformed payloads during hot-reload or server restart.
       }
@@ -78,12 +136,14 @@ function AppShell() {
     if (localSseAlertsEnabled) {
       es = new EventSource(API_URLS.sse);
       es.addEventListener("alert" as any, onAlert as any);
+      es.addEventListener("yt_master_call_resolved" as any, onYtMasterCallResolved as any);
     }
 
     return () => {
       receivedSub.remove();
       if (es) {
         es.removeEventListener("alert" as any, onAlert as any);
+        es.removeEventListener("yt_master_call_resolved" as any, onYtMasterCallResolved as any);
         es.close();
       }
     };
@@ -154,6 +214,22 @@ function AppShell() {
         <Stack.Screen
           name="monitor"
           options={{ headerTitle: () => <HeaderScrollTitle routeKey="monitor" title="Monitoring" color={colors.primaryText} /> }}
+        />
+        <Stack.Screen
+          name="yt-master-call"
+          options={{
+            headerTitle: () => <HeaderScrollTitle routeKey="yt-master-call" title="반장 호출" color={REF_CALL_HEADER.text} />,
+            headerStyle: { backgroundColor: REF_CALL_HEADER.background },
+            headerTintColor: REF_CALL_HEADER.text,
+            headerShadowVisible: false,
+            contentStyle: { backgroundColor: REF_CALL_HEADER.background },
+          }}
+        />
+        <Stack.Screen
+          name="yt-master-call-settings"
+          options={{
+            headerTitle: () => <HeaderScrollTitle routeKey="yt-master-call-settings" title="YT Master Call" color={colors.primaryText} />,
+          }}
         />
         <Stack.Screen
           name="monitor-gwct-eta"

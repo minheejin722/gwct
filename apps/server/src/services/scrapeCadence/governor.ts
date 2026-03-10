@@ -8,12 +8,14 @@ import type { SourceDefinition } from "../../scraper/sources.js";
 const FUTURE_ETA_GAP_MS = 90 * 60 * 1000;
 const MAX_IDLE_ACTIVE_LOGINS = 2;
 const REQUIRED_IDLE_STABLE_OBSERVATIONS = 2;
+const RELAXED_INTERVAL_MS = 600_000;
+const SCHEDULE_SEMI_FAST_INTERVAL_MS = 30_000;
 
 const RELAXED_INTERVALS: Partial<Record<SourceId, number>> = {
-  gwct_schedule_list: 600_000,
-  gwct_work_status: 600_000,
-  gwct_gc_remaining: 600_000,
-  gwct_equipment_status: 600_000,
+  gwct_schedule_list: SCHEDULE_SEMI_FAST_INTERVAL_MS,
+  gwct_work_status: RELAXED_INTERVAL_MS,
+  gwct_gc_remaining: RELAXED_INTERVAL_MS,
+  gwct_equipment_status: RELAXED_INTERVAL_MS,
 };
 
 const MANAGED_SOURCES = new Set<SourceId>([
@@ -31,6 +33,7 @@ interface ScheduleSignal {
   firstEta: string | null;
   etaGapMs: number | null;
   precedingGreenCount: number;
+  allRowsCyan: boolean;
 }
 
 interface WorkSignal {
@@ -46,8 +49,12 @@ interface EquipmentSignal {
   observedAt: string | null;
   eligibleCount: number;
   activeCount: number;
+  ytActiveCount: number;
+  supportActiveCount: number;
+  relevantActiveCount: number;
   idleStableObservations: number;
   activeFingerprints: string[];
+  relevantActiveFingerprints: string[];
 }
 
 function clean(text: string | null | undefined): string {
@@ -101,6 +108,21 @@ function isOperationalEquipmentId(equipmentId: string): boolean {
 
 function isNormalLogin(row: EquipmentLoginStatus): boolean {
   return Boolean(row.operatorName && row.loginText && !row.stopReason);
+}
+
+function isYtEquipmentId(equipmentId: string): boolean {
+  return /^YT\d+$/.test(equipmentId.toUpperCase().replace(/\s+/g, ""));
+}
+
+function isSupportEquipmentId(equipmentId: string): boolean {
+  const normalized = equipmentId.toUpperCase().replace(/\s+/g, "");
+  return (
+    /^LEASE\d+$/.test(normalized) ||
+    /^REPAIR\d+$/.test(normalized) ||
+    /^RS\d+$/.test(normalized) ||
+    /^TC\d+$/.test(normalized) ||
+    /^TH\d+$/.test(normalized)
+  );
 }
 
 function activeFingerprint(row: EquipmentLoginStatus): string {
@@ -168,21 +190,26 @@ function deriveScheduleSignal(vessels: VesselScheduleItem[], seenAt: string): Sc
       firstEta: null,
       etaGapMs: null,
       precedingGreenCount: 0,
+      allRowsCyan: false,
     };
   }
 
   const rowColor = clean(first.rawLabelMap?._rowColor).toLowerCase();
   const precedingGreenCount = Number(first.rawLabelMap?._precedingGreenCount || 0) || 0;
+  const allRowsCyan = clean(first.rawLabelMap?._allRowsCyan).toLowerCase() === "true";
   const etaMs = first.eta ? Date.parse(first.eta) : Number.NaN;
   const seenAtMs = Date.parse(seenAt);
   const etaGapMs = Number.isFinite(etaMs) && Number.isFinite(seenAtMs) ? etaMs - seenAtMs : null;
 
   return {
-    ready: rowColor === "yellow" && precedingGreenCount > 0 && etaGapMs !== null && etaGapMs >= FUTURE_ETA_GAP_MS,
+    ready:
+      allRowsCyan ||
+      (rowColor === "yellow" && precedingGreenCount > 0 && etaGapMs !== null && etaGapMs >= FUTURE_ETA_GAP_MS),
     observedAt: seenAt,
     firstEta: first.eta,
     etaGapMs,
     precedingGreenCount,
+    allRowsCyan,
   };
 }
 
@@ -273,6 +300,110 @@ function deriveWorkSignal(html: string, seenAt: string): WorkSignal {
   };
 }
 
+function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
+  const $ = load(html);
+  const tables = $("table.AA_list").toArray();
+  const seenAtMs = Date.parse(seenAt);
+
+  for (const table of tables) {
+    const headers = $(table)
+      .find("tr")
+      .first()
+      .find("th")
+      .map((_, th) => clean($(th).text()))
+      .get();
+
+    if (!headers.length) {
+      continue;
+    }
+
+    const etaIdx = findHeaderIndex(headers, ["입항일시", "입항 일시"]);
+    const progressIdx = findHeaderIndex(headers, ["진행률", "진행 률"]);
+    if (etaIdx < 0 || progressIdx < 0) {
+      continue;
+    }
+
+    const rows = $(table)
+      .find("tr")
+      .slice(1)
+      .toArray()
+      .map((row) =>
+        $(row)
+          .find("td")
+          .map((_, td) => clean($(td).text()))
+          .get(),
+      )
+      .filter((cells) => cells.length > Math.max(etaIdx, progressIdx));
+
+    // A recognized work summary table with no data rows means there is no active work.
+    if (!rows.length) {
+      return {
+        ready: true,
+        observedAt: seenAt,
+        rowCount: 0,
+        nearestEta: null,
+        nearestEtaGapMs: null,
+      };
+    }
+
+    const summaries = rows
+      .map((cells) => {
+        const eta = parseSeoulDate(cells[etaIdx] || null);
+        const progressPercent = parseNumeric(cells[progressIdx]);
+        if (!eta || progressPercent === null) {
+          return null;
+        }
+        const etaMs = Date.parse(eta);
+        return {
+          eta,
+          progressPercent,
+          etaGapMs: Number.isFinite(etaMs) && Number.isFinite(seenAtMs) ? etaMs - seenAtMs : null,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    if (!summaries.length) {
+      return {
+        ready: false,
+        observedAt: seenAt,
+        rowCount: rows.length,
+        nearestEta: null,
+        nearestEtaGapMs: null,
+      };
+    }
+
+    const nearestEtaGapMs = summaries.reduce<number | null>((current, row) => {
+      if (row.etaGapMs === null) {
+        return current;
+      }
+      if (current === null) {
+        return row.etaGapMs;
+      }
+      return Math.min(current, row.etaGapMs);
+    }, null);
+    const nearestEta =
+      nearestEtaGapMs === null
+        ? null
+        : summaries.find((row) => row.etaGapMs === nearestEtaGapMs)?.eta || null;
+
+    return {
+      ready: summaries.every((row) => row.progressPercent <= 0 && row.etaGapMs !== null && row.etaGapMs >= FUTURE_ETA_GAP_MS),
+      observedAt: seenAt,
+      rowCount: summaries.length,
+      nearestEta,
+      nearestEtaGapMs,
+    };
+  }
+
+  return {
+    ready: false,
+    observedAt: seenAt,
+    rowCount: 0,
+    nearestEta: null,
+    nearestEtaGapMs: null,
+  };
+}
+
 function deriveEquipmentSignal(
   equipment: EquipmentLoginStatus[],
   previousFingerprintKey: string | null,
@@ -280,10 +411,18 @@ function deriveEquipmentSignal(
   seenAt: string,
 ): EquipmentSignal {
   const eligible = equipment.filter((row) => isOperationalEquipmentId(row.equipmentId));
-  const activeFingerprints = eligible.filter(isNormalLogin).map(activeFingerprint);
-  const activeKey = fingerprintKey(activeFingerprints);
+  const activeRows = eligible.filter(isNormalLogin);
+  const activeFingerprints = activeRows.map(activeFingerprint);
+  const ytActiveRows = activeRows.filter((row) => isYtEquipmentId(row.equipmentId));
+  const supportActiveRows = activeRows.filter((row) => isSupportEquipmentId(row.equipmentId));
+  const relevantActiveRows =
+    ytActiveRows.length === 0
+      ? activeRows.filter((row) => !isSupportEquipmentId(row.equipmentId))
+      : activeRows;
+  const relevantActiveFingerprints = relevantActiveRows.map(activeFingerprint);
+  const activeKey = fingerprintKey(relevantActiveFingerprints);
   const stableIdleObservations =
-    activeFingerprints.length <= MAX_IDLE_ACTIVE_LOGINS
+    relevantActiveFingerprints.length <= MAX_IDLE_ACTIVE_LOGINS
       ? activeKey === previousFingerprintKey
         ? previousStableObservations + 1
         : 1
@@ -292,13 +431,17 @@ function deriveEquipmentSignal(
   return {
     ready:
       eligible.length > 0 &&
-      activeFingerprints.length <= MAX_IDLE_ACTIVE_LOGINS &&
+      relevantActiveFingerprints.length <= MAX_IDLE_ACTIVE_LOGINS &&
       stableIdleObservations >= REQUIRED_IDLE_STABLE_OBSERVATIONS,
     observedAt: seenAt,
     eligibleCount: eligible.length,
     activeCount: activeFingerprints.length,
+    ytActiveCount: ytActiveRows.length,
+    supportActiveCount: supportActiveRows.length,
+    relevantActiveCount: relevantActiveFingerprints.length,
     idleStableObservations: stableIdleObservations,
     activeFingerprints: [...activeFingerprints].sort(),
+    relevantActiveFingerprints: [...relevantActiveFingerprints].sort(),
   };
 }
 
@@ -314,6 +457,7 @@ export class GwctCadenceGovernor {
     firstEta: null,
     etaGapMs: null,
     precedingGreenCount: 0,
+    allRowsCyan: false,
   };
   private workSignal: WorkSignal = {
     ready: false,
@@ -327,8 +471,12 @@ export class GwctCadenceGovernor {
     observedAt: null,
     eligibleCount: 0,
     activeCount: 0,
+    ytActiveCount: 0,
+    supportActiveCount: 0,
+    relevantActiveCount: 0,
     idleStableObservations: 0,
     activeFingerprints: [],
+    relevantActiveFingerprints: [],
   };
 
   constructor(private readonly logger: Pick<FastifyBaseLogger, "info">) {}
@@ -351,7 +499,7 @@ export class GwctCadenceGovernor {
     }
 
     if (input.source === "gwct_work_status") {
-      this.workSignal = deriveWorkSignal(input.html, input.seenAt);
+      this.workSignal = deriveCurrentWorkSignal(input.html, input.seenAt);
     }
 
     if (input.source === "gwct_equipment_status") {
@@ -361,11 +509,11 @@ export class GwctCadenceGovernor {
         this.equipmentSignal.idleStableObservations,
         input.seenAt,
       );
-      this.lastEquipmentFingerprintKey = fingerprintKey(this.equipmentSignal.activeFingerprints);
+      this.lastEquipmentFingerprintKey = fingerprintKey(this.equipmentSignal.relevantActiveFingerprints);
     }
 
     if (this.mode === "relaxed" && input.source === "gwct_equipment_status") {
-      const currentActive = this.equipmentSignal.activeFingerprints;
+      const currentActive = this.equipmentSignal.relevantActiveFingerprints;
       if (
         currentActive.length > 0 &&
         hasNewFingerprint(currentActive, this.relaxedBaselineActiveFingerprints)
@@ -376,6 +524,9 @@ export class GwctCadenceGovernor {
         this.setMode("fast", input.seenAt, "equipment_login_activity", {
           holdFastUntilShiftBoundaryAt: this.holdFastUntilShiftBoundaryAt,
           activeCount,
+          ytActiveCount: this.equipmentSignal.ytActiveCount,
+          supportActiveCount: this.equipmentSignal.supportActiveCount,
+          relevantActiveCount: this.equipmentSignal.relevantActiveCount,
         });
         return;
       }
@@ -396,12 +547,15 @@ export class GwctCadenceGovernor {
 
     if (this.mode === "fast" && shouldRelax) {
       this.relaxedUntilShiftBoundaryAt = nextShiftBoundaryIso(input.seenAt);
-      this.relaxedBaselineActiveFingerprints = new Set(this.equipmentSignal.activeFingerprints);
+      this.relaxedBaselineActiveFingerprints = new Set(this.equipmentSignal.relevantActiveFingerprints);
       this.setMode("relaxed", input.seenAt, "early_off_duty_detected", {
         relaxedUntilShiftBoundaryAt: this.relaxedUntilShiftBoundaryAt,
         firstScheduleEta: this.scheduleSignal.firstEta,
         workEta: this.workSignal.nearestEta,
         activeEquipmentCount: this.equipmentSignal.activeCount,
+        ytActiveCount: this.equipmentSignal.ytActiveCount,
+        supportActiveCount: this.equipmentSignal.supportActiveCount,
+        relevantActiveCount: this.equipmentSignal.relevantActiveCount,
       });
     }
   }
@@ -440,6 +594,7 @@ export class GwctCadenceGovernor {
       equipmentSignal: {
         ...this.equipmentSignal,
         activeFingerprints: [...this.equipmentSignal.activeFingerprints],
+        relevantActiveFingerprints: [...this.equipmentSignal.relevantActiveFingerprints],
       },
     };
   }
@@ -493,6 +648,7 @@ export class GwctCadenceGovernor {
       firstEta: null,
       etaGapMs: null,
       precedingGreenCount: 0,
+      allRowsCyan: false,
     };
     this.workSignal = {
       ready: false,
@@ -506,8 +662,12 @@ export class GwctCadenceGovernor {
       observedAt: null,
       eligibleCount: 0,
       activeCount: 0,
+      ytActiveCount: 0,
+      supportActiveCount: 0,
+      relevantActiveCount: 0,
       idleStableObservations: 0,
       activeFingerprints: [],
+      relevantActiveFingerprints: [],
     };
     this.lastEquipmentFingerprintKey = null;
   }

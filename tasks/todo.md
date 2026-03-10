@@ -1,5 +1,110 @@
 ﻿# GWCT MVP Todo
 
+## YT Master Call Plan (2026-03-11)
+- [x] Re-scan the current Home card, Settings hero card, root stack routes, and existing device/SSE infrastructure to lock the minimal-impact insertion points for the new YT Master Call feature.
+- [x] Add a dedicated persisted YT Master Call store for:
+  - [x] per-device role registration (`none | driver | master`)
+  - [x] driver profile (`YT 번호`, `이름`)
+  - [x] master profile (`이름`, assigned slot `MASTER-1 | MASTER-2`)
+  - [x] call queue/history with `pending | approved | rejected` status and timestamps
+- [x] Add server APIs for:
+  - [x] current-device role/profile lookup
+  - [x] role registration/update with a strict two-master global cap
+  - [x] role clear/reset for the current device
+  - [x] driver call creation with one active pending call per driver guard
+  - [x] master call list retrieval ordered by call time
+  - [x] master approve/reject actions
+- [x] Broadcast YT Master Call SSE events so role changes, new calls, and approval/rejection state changes reach the app immediately.
+- [x] Extend shared types so the mobile app and server use the same role/call contracts.
+- [x] Add the mobile YT Master Call settings flow:
+  - [x] replace the first Settings card (`App Settings`) with `YT Master Call`
+  - [x] add a dedicated role setup screen for choosing `YT Master` or `YT Driver`
+  - [x] enforce name / YT number input rules and render current registration state
+- [x] Replace the Home 5th card (`모니터링 설정`) with `반장 호출` while keeping the bottom-tab `Monitoring` route unchanged.
+- [x] Add the new call screen with role-specific UI:
+  - [x] `YT Driver` layout matching the provided reference closely
+  - [x] `YT Master` queue layout matching the provided reference closely
+  - [x] live status refresh and immediate approval/rejection feedback
+- [x] Trigger an immediate local app notification or alert for the driver when a master approves or rejects a call.
+- [x] Add targeted server tests for store logic and route behavior, then run the relevant server tests plus workspace typecheck.
+
+## YT Master Call Review (2026-03-11)
+- Added a dedicated JSON-backed YT Master Call state store and service with strict business rules: max two global masters, normalized `YT-번호` driver registration, one pending call per driver, and pending-call guard on driver role clear/change.
+- Added shared role/call schemas in `@gwct/shared` so server and mobile now use the same contracts for `driver/master`, `MASTER-1/2`, call reasons, call queue entries, and live-state payloads.
+- Added server routes:
+  - `GET /api/yt-master-call/live?deviceId=...`
+  - `POST /api/yt-master-call/register`
+  - `DELETE /api/yt-master-call/register/:deviceId`
+  - `POST /api/yt-master-call/calls`
+  - `POST /api/yt-master-call/calls/:callId/decision`
+- Added YT Master Call SSE events:
+  - `yt_master_call_role_updated`
+  - `yt_master_call_changed`
+  - `yt_master_call_resolved`
+- Replaced the Home 5th card with `반장 호출` while leaving the bottom-tab `Monitoring` route intact.
+- Replaced the first Settings hero card with a `YT Master Call` entry card and added a dedicated role setup screen for `YT Master` / `YT Driver`.
+- Added the new `반장 호출` screen with role-specific layouts:
+  - driver view with big circular call button, reason chips, and live pending/approved/rejected status panel
+  - master view with oldest-first queue cards and approve/reject actions
+- Added a dedicated local-notification path for `yt_master_call_resolved` so driver approval/rejection alerts can still be forced visible immediately, separate from generic monitor-alert preference gating.
+- Verification:
+  - `npm --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm run typecheck`
+  - `npm test`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Schedule Relaxed Signal Plan (2026-03-11)
+- [x] Confirm the current relaxed-mode schedule signal logic and identify the narrow condition change needed.
+- [x] Update the GWCT cadence governor so the first relaxed condition is also satisfied when the `m=H&s=A` schedule list is entirely `cyan`.
+- [x] Preserve the existing `yellow`-window behavior for active or soon-to-work schedules.
+- [x] Add or update cadence governor tests for the all-`cyan` schedule case.
+- [x] Run targeted verification and record the outcome.
+
+## Schedule Relaxed Signal Review (2026-03-11)
+- Added `_allRowsCyan` schedule metadata in the GWCT parser so cadence logic can distinguish a true full-list idle state from the normal first-yellow watch window.
+- Updated the cadence governor so the first relaxed signal is ready when either the existing yellow-window rule matches or the parsed schedule list is entirely `cyan`.
+- Preserved the prior yellow-based rule unchanged for active/soon-to-work situations.
+- Verified with `npx vitest run tests/scrape-cadence-governor.test.ts tests/schedule-focus.test.ts` and `npm run typecheck` in `apps/server`.
+
+## Work Signal Fix Plan (2026-03-11)
+- [x] Reproduce the current live work-signal failure and confirm whether the blocker is stale runtime or bad work-status parsing.
+- [x] Update the cadence governor work-signal parser to match the current `m=F&s=A` headers and treat an empty work table as a relaxed-ready no-work state.
+- [x] Add or update tests for Korean work-status headers and the empty-table no-work case.
+- [x] Run targeted verification against tests and, if needed, a live diagnostic replay.
+
+## Work Signal Fix Review (2026-03-11)
+- Reproduced the live issue: schedule and equipment signals were already relaxed-ready, but the work signal stayed false because the governor looked for mojibake header labels instead of the current `입항일시` / `진행률` headers.
+- Added a current-DOM work-signal path that recognizes the Korean headers and treats a recognized work summary table with zero data rows as a no-work relaxed-ready state.
+- Added a cadence governor test for the empty-table case and updated the work-summary test HTML to the current header labels.
+- Verified with `npx vitest run tests/scrape-cadence-governor.test.ts tests/schedule-focus.test.ts`, `npm run typecheck`, and a live standalone replay that now yields `mode: "relaxed"` with the current GWCT pages.
+
+## Equipment Rule Refinement Plan (2026-03-11)
+- [x] Confirm the current equipment-signal rule that counts support-equipment logins together with YT logins.
+- [x] Refine the cadence governor so `LEASE` / `REPAIR` / `RS` / `TC` / `TH` logins do not block relaxed mode when active `YT` logins are zero.
+- [x] Preserve stability guards so the relaxed transition still requires two consistent observations.
+- [x] Add or update cadence governor tests for support-equipment logins with zero YT logins.
+- [x] Run targeted verification and record the result.
+
+## Equipment Rule Refinement Review (2026-03-11)
+- Updated the equipment signal to split active logins into YT, support-equipment, and relaxed-relevant sets, so support logins alone no longer block relaxed mode when YT logins are absent.
+- Changed stability tracking and relaxed wake-up tracking to use the relaxed-relevant fingerprint set, preventing `LEASE` / `REPAIR` / `RS` / `TC` / `TH` login churn from kicking the governor back to fast when YT stays at zero.
+- Added a cadence governor test that enters relaxed mode with only support-equipment logins and stays relaxed across further support-only login changes.
+- Verified with `npx vitest run tests/scrape-cadence-governor.test.ts tests/schedule-focus.test.ts` and `npm run typecheck` in `apps/server`.
+
+## Schedule Semi-Fast Exception Plan (2026-03-11)
+- [x] Confirm the current relaxed cadence applies a uniform interval to `gwct_schedule_list` and the other managed GWCT sources.
+- [x] Update the cadence governor so relaxed mode keeps `gwct_schedule_list` on a semi-fast exception interval while the other managed GWCT sources stay at the 10-minute relaxed cadence.
+- [x] Treat semi-fast as `30s`, per the user's concrete correction.
+- [x] Update cadence governor tests for the per-source relaxed cadence split and shift-boundary behavior.
+- [x] Run targeted verification and record the result.
+
+## Schedule Semi-Fast Exception Review (2026-03-11)
+- Changed relaxed per-source cadence so `gwct_schedule_list` now uses a `30s` semi-fast interval while `gwct_work_status`, `gwct_gc_remaining`, and `gwct_equipment_status` stay on the existing `10m` relaxed cadence.
+- Kept the current mode model intact; only the relaxed per-source interval table changed, so all relaxed entry/exit rules and shift-boundary wake behavior remain unchanged.
+- Updated cadence governor expectations to verify the schedule exception and to keep the boundary cap assertion on the non-schedule GWCT sources.
+- Verified with `npx vitest run tests/scrape-cadence-governor.test.ts tests/scheduler.test.ts` and `npm run typecheck` in `apps/server`.
+- Restarted the local server on port `4000` and confirmed live runtime behavior from `ScrapeRun`: after the initial fast-entry observations, `gwct_schedule_list` settled to roughly `30s` intervals.
+
 ## Plan
 - [x] Confirm live page accessibility and DOM reality for GWCT/YS Pilot.
 - [x] Lock architecture decisions for npm-only + SQLite-first stack.

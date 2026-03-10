@@ -419,6 +419,7 @@ export function parseGwctScheduleList(html: string, seenAt: string, source: Sour
   const firstNonGreenIndex = allRows.findIndex((row) => row.rowColor !== "green");
   const startIndex = firstYellowIndex >= 0 ? firstYellowIndex : firstNonGreenIndex;
   const startReason = firstYellowIndex >= 0 ? "first_yellow" : firstNonGreenIndex >= 0 ? "first_non_green" : "none";
+  const allRowsCyan = allRows.length > 0 && allRows.every((row) => row.rowColor === "cyan");
   const precedingGreenCount =
     startIndex > 0 ? allRows.slice(0, startIndex).filter((row) => row.rowColor === "green").length : 0;
 
@@ -451,6 +452,7 @@ export function parseGwctScheduleList(html: string, seenAt: string, source: Sour
         _rowColor: row.rowColor,
         _rowClass: row.rowClass || "",
         _etaNormalized: row.etaNormalized || "",
+        _allRowsCyan: String(allRowsCyan),
         _watchStartReason: startReason,
         _precedingGreenCount: String(precedingGreenCount),
       },

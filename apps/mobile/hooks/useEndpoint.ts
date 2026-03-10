@@ -7,6 +7,7 @@ interface UseEndpointOptions {
   pollMs?: number;
   immediate?: boolean;
   liveSources?: string[];
+  liveEvents?: string[];
 }
 
 interface RefreshOptions {
@@ -14,7 +15,7 @@ interface RefreshOptions {
 }
 
 export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
-  const { pollMs, immediate = true, liveSources } = options;
+  const { pollMs, immediate = true, liveSources, liveEvents } = options;
   const isFocused = useIsFocused();
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,6 +25,10 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
   const liveSourceKey = useMemo(
     () => (liveSources && liveSources.length ? [...liveSources].sort().join("|") : ""),
     [liveSources],
+  );
+  const liveEventKey = useMemo(
+    () => (liveEvents && liveEvents.length ? [...liveEvents].sort().join("|") : ""),
+    [liveEvents],
   );
 
   const refresh = useCallback(
@@ -81,11 +86,12 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
   }, [isFocused, pollMs, refresh]);
 
   useEffect(() => {
-    if (!isFocused || !liveSources?.length) {
+    if (!isFocused || (!liveSources?.length && !liveEvents?.length)) {
       return;
     }
 
-    const trackedSources = new Set(liveSources);
+    const trackedSources = new Set(liveSources || []);
+    const trackedEvents = [...new Set(liveEvents || [])];
     const es = new EventSource(API_URLS.sse);
 
     const onSourceUpdated = (event: { data?: string }) => {
@@ -103,14 +109,27 @@ export function useEndpoint<T>(url: string, options: UseEndpointOptions = {}) {
         // Ignore malformed SSE payloads during reconnects.
       }
     };
+    const onNamedEvent = () => {
+      void refresh({ silent: true });
+    };
 
-    es.addEventListener("source_updated" as any, onSourceUpdated as any);
+    if (trackedSources.size) {
+      es.addEventListener("source_updated" as any, onSourceUpdated as any);
+    }
+    for (const eventName of trackedEvents) {
+      es.addEventListener(eventName as any, onNamedEvent as any);
+    }
 
     return () => {
-      es.removeEventListener("source_updated" as any, onSourceUpdated as any);
+      if (trackedSources.size) {
+        es.removeEventListener("source_updated" as any, onSourceUpdated as any);
+      }
+      for (const eventName of trackedEvents) {
+        es.removeEventListener(eventName as any, onNamedEvent as any);
+      }
       es.close();
     };
-  }, [isFocused, liveSourceKey, liveSources, refresh]);
+  }, [isFocused, liveEventKey, liveEvents, liveSourceKey, liveSources, refresh]);
 
   return {
     data,

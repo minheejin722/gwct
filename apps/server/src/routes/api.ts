@@ -4,6 +4,9 @@ import {
   type AlertEvent,
   type SourceId,
   type YTUnitSnapshot,
+  YtMasterCallCreateInputSchema,
+  YtMasterCallDecisionInputSchema,
+  YtMasterCallRegistrationInputSchema,
 } from "@gwct/shared";
 import { z } from "zod";
 import { uid } from "../lib/id.js";
@@ -36,6 +39,14 @@ import { buildEffectiveYeosuSnapshot, buildYeosuObservedText } from "../services
 import { loadVesselEtaAdjustmentRecords } from "../services/vessels/etaAdjustmentStore.js";
 import { buildVesselLiveRows } from "../services/vessels/liveRows.js";
 import { buildYtUnitSnapshotFromEquipment } from "../services/equipment/ytUnits.js";
+import {
+  clearYtMasterCallRegistration,
+  createYtMasterCall,
+  decideYtMasterCall,
+  getYtMasterCallLiveState,
+  saveYtMasterCallRegistration,
+  YtMasterCallServiceError,
+} from "../services/ytMasterCall/service.js";
 
 interface RouteDeps {
   repo: Repository;
@@ -177,6 +188,13 @@ function toLegacyEquipmentConfigPayload(settings: Awaited<ReturnType<typeof load
     ytEnabled: settings.equipmentMonitor.yt.enabled,
     gcStaffEnabled: settings.equipmentMonitor.gcStaff.enabled,
   };
+}
+
+function sendYtMasterCallError(reply: FastifyReply, error: unknown) {
+  if (error instanceof YtMasterCallServiceError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+  throw error;
 }
 
 export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
@@ -610,6 +628,118 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
 
     const saved = await saveMonitorSettings(patch);
     return toLegacyGcThresholdPayload(saved);
+  });
+
+  app.get("/api/yt-master-call/live", async (request, reply) => {
+    const query = request.query as { deviceId?: string };
+    const deviceId = typeof query.deviceId === "string" ? query.deviceId.trim() : "";
+    if (!deviceId) {
+      return reply.code(400).send({ error: "deviceId is required" });
+    }
+
+    return getYtMasterCallLiveState(deviceId);
+  });
+
+  app.post("/api/yt-master-call/register", async (request, reply) => {
+    const parsed = YtMasterCallRegistrationInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    try {
+      const liveState = await saveYtMasterCallRegistration(parsed.data);
+      deps.sseHub.broadcast("yt_master_call_role_updated", {
+        deviceId: parsed.data.deviceId,
+        changedAt: new Date().toISOString(),
+      });
+      return liveState;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
+  });
+
+  app.delete("/api/yt-master-call/register/:deviceId", async (request, reply) => {
+    const params = request.params as { deviceId?: string };
+    const deviceId = typeof params.deviceId === "string" ? params.deviceId.trim() : "";
+    if (!deviceId) {
+      return reply.code(400).send({ error: "deviceId is required" });
+    }
+
+    try {
+      const liveState = await clearYtMasterCallRegistration(deviceId);
+      deps.sseHub.broadcast("yt_master_call_role_updated", {
+        deviceId,
+        changedAt: new Date().toISOString(),
+      });
+      return liveState;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
+  });
+
+  app.post("/api/yt-master-call/calls", async (request, reply) => {
+    const parsed = YtMasterCallCreateInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    try {
+      const liveState = await createYtMasterCall(parsed.data);
+      deps.sseHub.broadcast("yt_master_call_changed", {
+        type: "created",
+        deviceId: parsed.data.deviceId,
+        callId: liveState.currentCall?.id || null,
+        changedAt: liveState.currentCall?.updatedAt || new Date().toISOString(),
+      });
+      return liveState;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
+  });
+
+  app.post("/api/yt-master-call/calls/:callId/decision", async (request, reply) => {
+    const params = request.params as { callId?: string };
+    const callId = typeof params.callId === "string" ? params.callId.trim() : "";
+    if (!callId) {
+      return reply.code(400).send({ error: "callId is required" });
+    }
+
+    const parsed = YtMasterCallDecisionInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    try {
+      const result = await decideYtMasterCall(callId, parsed.data);
+      deps.sseHub.broadcast("yt_master_call_changed", {
+        type: "resolved",
+        deviceId: parsed.data.deviceId,
+        driverDeviceId: result.call.driverDeviceId,
+        callId: result.call.id,
+        status: result.call.status,
+        changedAt: result.call.updatedAt,
+      });
+
+      const resolvedLabel = result.call.status === "approved" ? "승인" : "거절";
+      deps.sseHub.broadcast("yt_master_call_resolved", {
+        eventId: `yt_master_call:${result.call.id}:${result.call.status}:${result.call.updatedAt}`,
+        callId: result.call.id,
+        driverDeviceId: result.call.driverDeviceId,
+        status: result.call.status,
+        title: `반장 호출 ${resolvedLabel}`,
+        message:
+          result.call.status === "approved"
+            ? `${result.call.ytNumber} ${result.call.driverName} 호출이 승인되었습니다.`
+            : `${result.call.ytNumber} ${result.call.driverName} 호출이 거절되었습니다.`,
+        resolvedByName: result.call.resolvedByName,
+        reasonLabel: result.call.reasonLabel,
+        updatedAt: result.call.updatedAt,
+      });
+
+      return result;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
   });
 
   app.get("/api/alerts", async (request) => {
