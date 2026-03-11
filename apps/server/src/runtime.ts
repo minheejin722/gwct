@@ -45,6 +45,7 @@ export async function createRuntime() {
     monitorService,
     sseHub,
     cleanupService,
+    notificationService,
   });
 
   return {

@@ -274,17 +274,336 @@ export type YtMasterCallRole = z.infer<typeof YtMasterCallRoleSchema>;
 export const YtMasterCallMasterSlotSchema = z.enum(["MASTER-1", "MASTER-2"]);
 export type YtMasterCallMasterSlot = z.infer<typeof YtMasterCallMasterSlotSchema>;
 
-export const YtMasterCallStatusSchema = z.enum(["pending", "approved", "rejected"]);
+export const YtMasterCallStatusSchema = z.enum([
+  "pending",
+  "sent",
+  "approved",
+  "rejected",
+  "acknowledged",
+  "cancelled",
+]);
 export type YtMasterCallStatus = z.infer<typeof YtMasterCallStatusSchema>;
 
-export const YtMasterCallReasonSchema = z.enum(["tractor_inspection", "restroom", "other"]);
+export const YtMasterCallHandlingModeSchema = z.enum(["decision", "message"]);
+export type YtMasterCallHandlingMode = z.infer<typeof YtMasterCallHandlingModeSchema>;
+
+export const YtMasterCallReasonSchema = z.enum(["tractor_inspection", "restroom", "other", "emergency_accident"]);
 export type YtMasterCallReason = z.infer<typeof YtMasterCallReasonSchema>;
 
 export const YT_MASTER_CALL_REASON_LABELS: Record<YtMasterCallReason, string> = {
   tractor_inspection: "트랙터 점검",
   restroom: "화장실",
   other: "기타 사유",
+  emergency_accident: "긴급 사고",
 };
+
+export const YtMasterCallTractorSubreasonSchema = z.enum([
+  "flat_tire",
+  "wheel_detached",
+  "coolant",
+  "engine_oil",
+  "mission_oil",
+  "fueling",
+  "air_conditioner",
+  "heater",
+  "radio_failure",
+  "base_bolt",
+  "first_axle_tire_wire",
+  "light_replacement",
+  "engine_stall",
+  "starting_failure",
+  "hydraulic_oil",
+  "power_oil",
+  "air_leak",
+  "spring_break_3plus",
+  "wheel_bolt_break_3plus",
+  "dashcam",
+  "drowsiness_prevention_device",
+  "seatbelt",
+  "window_damage",
+  "top_tilting_failure",
+  "battery_discharge",
+  "mirror_replacement",
+  "mirror_bolt_tightening",
+  "spring_equalizer_detachment",
+  "hub_oil_leak",
+  "undercarriage_oil_leak",
+]);
+export type YtMasterCallTractorSubreason = z.infer<typeof YtMasterCallTractorSubreasonSchema>;
+
+export const YT_MASTER_CALL_TRACTOR_SUBREASON_OPTIONS: readonly YtMasterCallTractorSubreason[] = [
+  "flat_tire",
+  "wheel_detached",
+  "coolant",
+  "engine_oil",
+  "mission_oil",
+  "fueling",
+  "air_conditioner",
+  "heater",
+  "radio_failure",
+  "base_bolt",
+  "first_axle_tire_wire",
+  "light_replacement",
+  "engine_stall",
+  "starting_failure",
+  "hydraulic_oil",
+  "power_oil",
+  "air_leak",
+  "spring_break_3plus",
+  "wheel_bolt_break_3plus",
+  "dashcam",
+  "drowsiness_prevention_device",
+  "seatbelt",
+  "window_damage",
+  "top_tilting_failure",
+  "battery_discharge",
+  "mirror_replacement",
+  "mirror_bolt_tightening",
+  "spring_equalizer_detachment",
+  "hub_oil_leak",
+  "undercarriage_oil_leak",
+];
+
+export const YT_MASTER_CALL_TRACTOR_SUBREASON_LABELS: Record<YtMasterCallTractorSubreason, string> = {
+  flat_tire: "타이어 펑크",
+  wheel_detached: "바퀴 빠짐",
+  coolant: "냉각수 보충",
+  engine_oil: "엔진오일 보충",
+  mission_oil: "미션오일 보충",
+  fueling: "주유",
+  air_conditioner: "에어컨",
+  heater: "히터",
+  radio_failure: "무전기 불량",
+  base_bolt: "베이스볼트",
+  first_axle_tire_wire: "1축 타이어 철심",
+  light_replacement: "라이트 교체",
+  engine_stall: "시동꺼짐",
+  starting_failure: "시동불량",
+  hydraulic_oil: "작동유 보충",
+  power_oil: "파워오일보충",
+  air_leak: "에어누공",
+  spring_break_3plus: "판스프링 3장 이상 파손",
+  wheel_bolt_break_3plus: "휠 볼트 3개 이상 파손",
+  dashcam: "블랙박스",
+  drowsiness_prevention_device: "졸음 방지기",
+  seatbelt: "안전벨트 고장",
+  window_damage: "유리창 파손",
+  top_tilting_failure: "탑 틸팅 안됨",
+  battery_discharge: "배터리 방전",
+  mirror_replacement: "백미러 교체",
+  mirror_bolt_tightening: "백미러 볼트 쪼이기",
+  spring_equalizer_detachment: "판스프링 이퀄라이저 이탈",
+  hub_oil_leak: "허브오일 누유",
+  undercarriage_oil_leak: "하부누유",
+};
+
+export const YtMasterCallOtherSubreasonSchema = z.enum([
+  "tea_time",
+  "day_off_schedule",
+  "outing",
+  "individual_counseling",
+  "suggestion",
+  "gc181_cabin_report",
+  "gc182_cabin_report",
+  "gc183_cabin_report",
+  "gc184_cabin_report",
+  "gc185_cabin_report",
+  "gc186_cabin_report",
+  "gc187_cabin_report",
+  "gc188_cabin_report",
+  "gc189_cabin_report",
+  "gc190_cabin_report",
+  "tc_bad_manners_report",
+  "reach_bad_manners_report",
+  "under_bad_manners_report",
+  "lashingman_danger",
+  "inspection_danger",
+  "yard_container_first_lane_first_tier_protrusion",
+  "shift_shuttle",
+  "transshipment_done",
+  "vessel_done",
+  "lunch_shuttle",
+  "wash_face",
+  "cold_water",
+]);
+export type YtMasterCallOtherSubreason = z.infer<typeof YtMasterCallOtherSubreasonSchema>;
+
+export const YT_MASTER_CALL_OTHER_SUBREASON_OPTIONS: readonly YtMasterCallOtherSubreason[] = [
+  "tea_time",
+  "day_off_schedule",
+  "outing",
+  "individual_counseling",
+  "suggestion",
+  "gc181_cabin_report",
+  "gc182_cabin_report",
+  "gc183_cabin_report",
+  "gc184_cabin_report",
+  "gc185_cabin_report",
+  "gc186_cabin_report",
+  "gc187_cabin_report",
+  "gc188_cabin_report",
+  "gc189_cabin_report",
+  "gc190_cabin_report",
+  "tc_bad_manners_report",
+  "reach_bad_manners_report",
+  "under_bad_manners_report",
+  "lashingman_danger",
+  "inspection_danger",
+  "yard_container_first_lane_first_tier_protrusion",
+  "shift_shuttle",
+  "transshipment_done",
+  "vessel_done",
+  "lunch_shuttle",
+  "wash_face",
+  "cold_water",
+];
+
+export const YT_MASTER_CALL_OTHER_SUBREASON_LABELS: Record<YtMasterCallOtherSubreason, string> = {
+  tea_time: "티타임",
+  day_off_schedule: "휴무일정",
+  outing: "외출",
+  individual_counseling: "개별상담",
+  suggestion: "건의사항",
+  gc181_cabin_report: "GC181 고발",
+  gc182_cabin_report: "GC182 고발",
+  gc183_cabin_report: "GC183 고발",
+  gc184_cabin_report: "GC184 고발",
+  gc185_cabin_report: "GC185 고발",
+  gc186_cabin_report: "GC186 고발",
+  gc187_cabin_report: "GC187 고발",
+  gc188_cabin_report: "GC188 고발",
+  gc189_cabin_report: "GC189 고발",
+  gc190_cabin_report: "GC190 고발",
+  tc_bad_manners_report: "TC 고발",
+  reach_bad_manners_report: "리치 고발",
+  under_bad_manners_report: "언더 고발",
+  lashingman_danger: "라이싱맨 위험",
+  inspection_danger: "검수 위험",
+  yard_container_first_lane_first_tier_protrusion: "컨테이너 돌출",
+  shift_shuttle: "교대 셔틀",
+  transshipment_done: "이적 끝",
+  vessel_done: "본선 끝",
+  lunch_shuttle: "점심 셔틀",
+  wash_face: "세수",
+  cold_water: "냉수 한잔",
+};
+
+export const YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_OPTIONS: readonly YtMasterCallOtherSubreason[] = [
+  "individual_counseling",
+  "suggestion",
+  "gc181_cabin_report",
+  "gc182_cabin_report",
+  "gc183_cabin_report",
+  "gc184_cabin_report",
+  "gc185_cabin_report",
+  "gc186_cabin_report",
+  "gc187_cabin_report",
+  "gc188_cabin_report",
+  "gc189_cabin_report",
+  "gc190_cabin_report",
+  "tc_bad_manners_report",
+  "reach_bad_manners_report",
+  "under_bad_manners_report",
+  "lashingman_danger",
+  "inspection_danger",
+  "yard_container_first_lane_first_tier_protrusion",
+  "transshipment_done",
+  "vessel_done",
+];
+
+export const YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_OPTIONS: readonly YtMasterCallTractorSubreason[] = [
+  "engine_stall",
+  "starting_failure",
+  "radio_failure",
+  "battery_discharge",
+  "dashcam",
+  "drowsiness_prevention_device",
+  "seatbelt",
+  "wheel_detached",
+];
+
+export const YtMasterCallReasonDetailCodeSchema = z.union([
+  YtMasterCallTractorSubreasonSchema,
+  YtMasterCallOtherSubreasonSchema,
+]);
+export type YtMasterCallReasonDetailCode = z.infer<typeof YtMasterCallReasonDetailCodeSchema>;
+
+const YT_MASTER_CALL_TRACTOR_SUBREASON_SET = new Set<string>(YT_MASTER_CALL_TRACTOR_SUBREASON_OPTIONS);
+const YT_MASTER_CALL_OTHER_SUBREASON_SET = new Set<string>(YT_MASTER_CALL_OTHER_SUBREASON_OPTIONS);
+const YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_SET = new Set<string>(
+  YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_OPTIONS,
+);
+const YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_SET = new Set<string>(
+  YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_OPTIONS,
+);
+
+export function isYtMasterCallTractorSubreason(
+  value: string,
+): value is YtMasterCallTractorSubreason {
+  return YT_MASTER_CALL_TRACTOR_SUBREASON_SET.has(value);
+}
+
+export function isYtMasterCallOtherSubreason(
+  value: string,
+): value is YtMasterCallOtherSubreason {
+  return YT_MASTER_CALL_OTHER_SUBREASON_SET.has(value);
+}
+
+export function isYtMasterCallMessageOnlyOtherSubreason(
+  value: string,
+): value is YtMasterCallOtherSubreason {
+  return YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_SET.has(value);
+}
+
+export function isYtMasterCallMessageOnlyTractorSubreason(
+  value: string,
+): value is YtMasterCallTractorSubreason {
+  return YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_SET.has(value);
+}
+
+export function getYtMasterCallReasonDetailLabel(
+  reasonCode: YtMasterCallReason,
+  reasonDetailCode?: YtMasterCallReasonDetailCode | null,
+): string | null {
+  if (!reasonDetailCode) {
+    return null;
+  }
+  if (reasonCode === "tractor_inspection" && isYtMasterCallTractorSubreason(reasonDetailCode)) {
+    return YT_MASTER_CALL_TRACTOR_SUBREASON_LABELS[reasonDetailCode];
+  }
+  if (reasonCode === "other" && isYtMasterCallOtherSubreason(reasonDetailCode)) {
+    return YT_MASTER_CALL_OTHER_SUBREASON_LABELS[reasonDetailCode];
+  }
+  return null;
+}
+
+export function getYtMasterCallHandlingMode(
+  reasonCode: YtMasterCallReason,
+  reasonDetailCode?: YtMasterCallReasonDetailCode | null,
+): YtMasterCallHandlingMode {
+  if (
+    reasonCode === "tractor_inspection" &&
+    reasonDetailCode &&
+    isYtMasterCallMessageOnlyTractorSubreason(reasonDetailCode)
+  ) {
+    return "message";
+  }
+  if (
+    reasonCode === "other" &&
+    reasonDetailCode &&
+    isYtMasterCallMessageOnlyOtherSubreason(reasonDetailCode)
+  ) {
+    return "message";
+  }
+  return "decision";
+}
+
+export function formatYtMasterCallReasonDisplay(
+  reasonLabel: string,
+  reasonDetailLabel?: string | null,
+): string {
+  return reasonDetailLabel ? `${reasonLabel} · ${reasonDetailLabel}` : reasonLabel;
+}
 
 export const YtMasterCallRegistrationSchema = z.object({
   deviceId: z.string(),
@@ -304,6 +623,9 @@ export const YtMasterCallQueueEntrySchema = z.object({
   ytNumber: z.string(),
   reasonCode: YtMasterCallReasonSchema,
   reasonLabel: z.string(),
+  reasonDetailCode: YtMasterCallReasonDetailCodeSchema.nullable().optional().default(null),
+  reasonDetailLabel: z.string().nullable().optional().default(null),
+  handlingMode: YtMasterCallHandlingModeSchema.default("decision"),
   status: YtMasterCallStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -349,14 +671,51 @@ export type YtMasterCallRegistrationInput = z.infer<typeof YtMasterCallRegistrat
 export const YtMasterCallCreateInputSchema = z.object({
   deviceId: z.string(),
   reasonCode: YtMasterCallReasonSchema,
+  reasonDetailCode: YtMasterCallReasonDetailCodeSchema.nullable().optional().default(null),
+}).superRefine((value, ctx) => {
+  if (!value.reasonDetailCode) {
+    return;
+  }
+  if (value.reasonCode === "tractor_inspection") {
+    if (!isYtMasterCallTractorSubreason(value.reasonDetailCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonDetailCode"],
+        message: "Tractor detail is allowed only for tractor inspection calls.",
+      });
+    }
+    return;
+  }
+  if (value.reasonCode === "other") {
+    if (!isYtMasterCallOtherSubreason(value.reasonDetailCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonDetailCode"],
+        message: "Other detail is allowed only for other calls.",
+      });
+    }
+    return;
+  }
+  if (value.reasonDetailCode) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reasonDetailCode"],
+      message: "Reason detail is allowed only for tractor inspection or other calls.",
+    });
+  }
 });
-export type YtMasterCallCreateInput = z.infer<typeof YtMasterCallCreateInputSchema>;
+export type YtMasterCallCreateInput = z.input<typeof YtMasterCallCreateInputSchema>;
 
 export const YtMasterCallDecisionInputSchema = z.object({
   deviceId: z.string(),
-  status: z.enum(["approved", "rejected"]),
+  status: z.enum(["approved", "rejected", "acknowledged"]),
 });
 export type YtMasterCallDecisionInput = z.infer<typeof YtMasterCallDecisionInputSchema>;
+
+export const YtMasterCallCancelInputSchema = z.object({
+  deviceId: z.string(),
+});
+export type YtMasterCallCancelInput = z.infer<typeof YtMasterCallCancelInputSchema>;
 
 export const GwctEtaDirectionSchema = z.enum(["earlier", "later"]);
 export type GwctEtaDirection = z.infer<typeof GwctEtaDirectionSchema>;

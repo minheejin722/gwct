@@ -1,5 +1,221 @@
 ﻿# GWCT MVP Todo
 
+## YT Driver Peek Edit Plan (2026-03-11)
+- [x] Re-check the `YT Driver` identity block and the existing YT Master registration update API.
+- [x] Add a long-press peek/pop-style number edit popup on the top-right driver identity block so only the YT number can be changed in place.
+- [x] Run targeted mobile verification and record the result.
+
+## YT Driver Peek Edit Review (2026-03-11)
+- Updated `apps/mobile/app/yt-master-call.tsx` so the top-right `YT ?? / ??` block in the driver view now opens a small number-edit popup on long press.
+- Reused the existing `saveYtMasterCallRegistration(...)` path to update only the current driver device's YT number while preserving the saved name.
+- The popup is a small top-right overlay instead of a full settings navigation flow, so operators can adjust the number in place.
+- If there is already a pending call, the popup now makes it explicit that the changed YT number applies from the next call onward.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+## YT Master Header Alignment Plan (2026-03-11)
+- [x] Re-check the current `YT Master` top header block in `?? ??` and compare it to the already-tightened `YT Driver` header layout.
+- [x] Remove the extra top-left brand block from the master view and move `MASTER-N / ??` into the same top row as the large `YT Master` title.
+- [x] Remove the visible `(??)` suffix and run targeted mobile verification.
+
+## YT Master Header Alignment Review (2026-03-11)
+- Updated `apps/mobile/app/yt-master-call.tsx` so the master view now uses the same compact top row pattern as the driver view.
+- Removed the top-left cube icon and `YT Master` brand block from the master screen.
+- Moved the right-side identity block to the same top row as the large `YT Master` title and kept it as:
+  - first line: `MASTER-N`
+  - second line: operator name
+- Removed the visible `(??)` suffix from the large master title so the screen header now matches the driver's structure more closely.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+## YT Master Push Notification Upgrade Plan (2026-03-11)
+- [x] Re-check the current GWCT push pipeline and the YT Master Call SSE-only path to lock the minimal no-design-change implementation.
+- [x] Add targeted push delivery for YT Master call creation and approval/rejection so driver/master devices can receive OS-level notifications while backgrounded or terminated.
+- [x] Add the minimum mobile notification-response routing needed so tapping a YT Master push opens the existing `반장 호출` screen without redesigning any UI.
+- [x] Run targeted verification, then record the final review with concrete limits/risks.
+
+## YT Master Push Notification Upgrade Review (2026-03-11)
+- Kept the existing `반장 호출` UI and layouts intact; this change upgrades notification delivery and notification-tap routing rather than redesigning the screen itself.
+- Added targeted push delivery for YT Master events:
+  - new driver call creation now pushes to the currently registered master device ids
+  - approval/rejection now pushes directly to the owning driver device id
+- Extended the shared deep-link target enum with `yt-master-call` so YT Master notifications can open the existing call screen from an OS notification tap.
+- Added mobile notification-response routing in `apps/mobile/app/_layout.tsx` so tapping a delivered push opens `/yt-master-call` without changing the screen design.
+- Removed the old YT Master SSE-to-local-notification duplication path so approval/rejection no longer depends only on an in-app SSE connection when push is available.
+- Added server route coverage for the targeted push path and reset the persisted YT Master test store before each route test to avoid live-state leakage into recipients.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-api.test.ts tests/expo-provider.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Foreground Alert And Auto-Open Fix Plan (2026-03-11)
+- [x] Re-check why YT Master approval alerts were not visibly arriving and why the app stayed on unrelated screens while already open.
+- [x] Add the minimum server/mobile flags and foreground fallback handling so YT Master notifications can force a banner and auto-open the existing `반장 호출` screen while the app is already running.
+- [x] Preserve the no-redesign UI scope, rerun verification, and document the remaining runtime limitation.
+
+## YT Master Foreground Alert And Auto-Open Fix Review (2026-03-11)
+- Added `forcePresentation` and `autoOpen` notification payload hints to the targeted YT Master push path so the existing Expo notification handler can treat YT call events as urgent and routable.
+- Expanded the YT Master SSE broadcasts so new master-call creation now includes enough targeting metadata (`masterDeviceIds`, `title`, `message`, `eventId`) for an in-app fallback when the server push provider is disabled.
+- Reworked `apps/mobile/app/_layout.tsx` so:
+  - foreground YT Master notifications auto-open `/yt-master-call` even if the user is currently on another screen
+  - YT Master SSE events schedule forced local notifications and trigger the same route opening path for the relevant driver/master device only
+  - notification taps still route into the existing `반장 호출` screen
+- This restores visible approval/rejection alerts during local development too, where `EXPO_PUSH_ENABLED=false` means OS push is not actually leaving the server.
+- Remaining limit:
+  - if the app is backgrounded or terminated and the server still has `EXPO_PUSH_ENABLED=false`, SSE fallback cannot wake the app; that case still needs real Expo push enabled on the deployed server.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-api.test.ts tests/expo-provider.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Yeosu Scrape Interval Change Plan (2026-03-11)
+- [x] Confirm the current Yeosu Pilotage scrape interval source and the running server process using port `4000`.
+- [x] Change the active Yeosu scrape interval from `10000ms` to `60000ms` in the local server config and repo defaults/examples.
+- [x] Restart the local server and verify the updated `60초` cadence is the running value.
+
+## Yeosu Scrape Interval Change Review (2026-03-11)
+- Changed `YS_INTERVAL_MS` from `10000` to `60000` in:
+  - `apps/server/.env`
+  - `apps/server/.env.example`
+  - `apps/server/src/config/env.ts`
+- Restarted the local server on port `4000` so the new Yeosu cadence took effect immediately.
+- Runtime verification:
+  - `ys_forecast` scrape started at `2026-03-11 10:15:38 KST`
+  - next `ys_forecast` scrape started at `2026-03-11 10:16:38 KST`
+  - this confirms the running interval is now about `60초`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+
+## Home GWCT Label Correction Plan (2026-03-11)
+- [x] Identify the exact home GWCT widget label rendering `예선 상태`.
+- [x] Update the visible label to `도선 상태` without changing the underlying behavior or status color logic.
+- [x] Run quick mobile verification and document the result.
+
+## Home GWCT Label Correction Review (2026-03-11)
+- Updated the home `GWCT` widget label in `apps/mobile/app/(tabs)/index.tsx` from `예선 상태` to `도선 상태`.
+- Kept the existing status value (`근무` / `중단`) and color logic unchanged; this was a terminology-only correction.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Call Driver Header And Loader Tightening Plan (2026-03-11)
+- [x] Re-check the user's follow-up corrections to the pending loader and driver header layout.
+- [x] Remove the extra pending helper sentence, remove the driver's top-left brand block, move the driver identity to the title row, and simplify the loader center so the faint inner circle disappears while the hourglass grows slightly.
+- [x] Run targeted mobile verification and document the result.
+
+## YT Master Call Driver Header And Loader Tightening Review (2026-03-11)
+- Removed the pending helper copy `반장 연결을 기다리고 있습니다.` so the waiting card stays cleaner and shorter.
+- Removed the top-left cube icon + `YT Master` brand row from the `YT Driver` screen only, then moved `YT 번호 / 기사 이름` onto the same top row as the `YT Driver` title to reclaim vertical space and pull the whole layout upward.
+- Kept the outer orbiting dot loader exactly as the waiting signal, removed the faint inner circular badge background, and increased the center hourglass size so the icon stays clearer without introducing extra visual bulk.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Call Pending Loader Redesign Plan (2026-03-11)
+- [x] Re-check the first pending-hourglass animation against the user's screenshot-driven correction and confirm the desired direction is a standard circular loading ring, not a spinning center icon.
+- [x] Replace the previous spinning-hourglass treatment with a static center plus orbiting circular loading dots and adjust the pending card layout to support the new visual hierarchy.
+- [x] Run targeted mobile verification and document the redesign result.
+
+## YT Master Call Pending Loader Redesign Review (2026-03-11)
+- Replaced the first spinning-hourglass version with a more standard waiting loader in `apps/mobile/app/yt-master-call.tsx`.
+- The pending card now uses:
+  - a static centered hourglass badge
+  - a surrounding ring of fading blue dots
+  - continuous ring rotation to communicate active waiting without spinning the center icon itself
+- Expanded the pending card so the loader reads as the primary visual and added a short subline (`반장 연결을 기다리고 있습니다.`) under `호출 대기 중...`.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Call Pending Hourglass Animation Plan (2026-03-11)
+- [x] Re-check the current `호출 대기 중` UI in `YT Master Call` and confirm that the waiting state still uses a static hourglass icon.
+- [x] Add a looping motion treatment so the pending hourglass visibly reads as an active waiting/loading state.
+- [x] Run targeted mobile verification and document the result.
+
+## YT Master Call Pending Hourglass Animation Review (2026-03-11)
+- Added a dedicated pending-hourglass animation in `apps/mobile/app/yt-master-call.tsx` using `react-native-reanimated`.
+- The `호출 대기 중...` card now shows a continuously rotating `timer-sand` icon while the call remains pending, which makes the waiting/loading state read more clearly at a glance.
+- Kept the scope local to the driver's pending card so approved/rejected states and the rest of the YT Master Call UI remain unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Call Master Rejection Runtime Test (2026-03-11)
+- [x] Re-check the live store and identify the actual pending `YT-591 / 이송택 / 화장실` call after the user reported it was just sent.
+- [x] Register a dedicated test `YT Master` device as `송일권` because no active master registration was present in server state at the time of the test.
+- [x] Reject the pending call as `송일권` and verify the driver and master live states reflect the rejection.
+
+## YT Master Call Master Rejection Runtime Test Review (2026-03-11)
+- Found pending call `yt_master_call_03911a05-cc61-4cdd-a8e3-bd24cf73476e` for `YT-591 / 이송택 / 화장실`.
+- At the moment of handling, the server had no active master registration, so I registered test master device `codex-master-song-ilgwon-20260311` as `송일권 / MASTER-1` and used that role to process the call.
+- Rejected the call through `POST /api/yt-master-call/calls/:callId/decision` with `status: "rejected"`.
+- Verified:
+  - the driver's `currentCall.status` is now `rejected`
+  - `resolvedByName` is `송일권`
+  - master `pendingCount` is now `0`
+
+## YT Master Call Second Live Runtime Test (2026-03-11)
+- [x] Register a second dedicated test `YT Driver` device for `YT-591 / 이송택`.
+- [x] Create a live `트랙터 점검` call for that driver and verify it appears as pending.
+- [x] Confirm the new call is visible in master `송일권`'s queue together with the earlier pending test call.
+
+## YT Master Call Second Live Runtime Test Review (2026-03-11)
+- Registered test driver device `codex-driver-inspection-20260311-591` as `이송택 / YT-591`.
+- Created pending call `yt_master_call_93d4c4e8-d601-46bb-9636-95fd0e04b71d` with `reasonCode: "tractor_inspection"` and `reasonLabel: "트랙터 점검"`.
+- Verified the call in both:
+  - the driver's `currentCall`
+  - master `송일권`'s live `queue`
+- Current master queue state after the second call:
+  - earlier pending `화장실` call for `YT-998`
+  - new pending `트랙터 점검` call for `YT-591 / 이송택`
+  - `pendingCount: 2`
+
+## YT Master Call Live Runtime Test (2026-03-11)
+- [x] Verify the local server is currently serving the YT Master Call live API and confirm the active master assignment before sending a test call.
+- [x] Register a dedicated test `YT Driver` device and create a live call with the `화장실` reason.
+- [x] Verify that the pending call appears in the registered driver's live state and in master `송일권`'s queue.
+
+## YT Master Call Live Runtime Test Review (2026-03-11)
+- Confirmed the local server was reachable at `http://127.0.0.1:4000` and already had `송일권` registered as `MASTER-1`.
+- Registered test driver device `codex-driver-restroom-20260311-1` with `YT-998`, then created a call with `reasonCode: "restroom"`.
+- Verified the created pending call `yt_master_call_d8d21060-4436-4229-9b1c-7a8bab61a2ce` in both:
+  - the driver's `currentCall`
+  - master `송일권`'s `queue`
+- Current live result:
+  - `reasonLabel: "화장실"`
+  - `status: "pending"`
+  - `pendingCount: 1`
+
+## YT Master Call Keyboard Scroll Re-fix Plan (2026-03-11)
+- [x] Re-check the failed on-device keyboard behavior against the current `YT Master Call` settings screen structure and identify why the first focus-scroll approach did not visibly move the form.
+- [x] Replace the fragile responder-based scroll path with explicit keyboard-aware insets and measured overlap-based input scrolling.
+- [x] Run targeted mobile verification and record the corrected review.
+
+## YT Master Call Keyboard Scroll Re-fix Review (2026-03-11)
+- Root cause: the screen still used a plain `ScrollView` with no real keyboard inset handling, and the first fix relied only on `scrollResponderScrollNativeHandleToKeyboard`, which did not produce a visible scroll on the actual iPhone layout shown by the user.
+- Reworked `apps/mobile/app/yt-master-call-settings.tsx` so the settings form now:
+  - enables `automaticallyAdjustKeyboardInsets`
+  - tracks the live keyboard frame and current scroll offset
+  - measures the focused field wrapper in window coordinates
+  - scrolls by the exact overlap amount needed to keep the active field above the keyboard with breathing room
+- Applied the same measured scroll path to both the driver `YT 번호` field and the shared `이름` field, so both `YT Driver` and `YT Master` registration cases follow the same keyboard-avoidance logic.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Call Keyboard Scroll Plan (2026-03-11)
+- [x] Re-check the current `YT Master Call` settings form structure and confirm why the lower registration inputs can sit under the iPhone keyboard.
+- [x] Add focused-input scroll handling so the active `YT 번호` / `이름` field is moved above the keyboard while typing.
+- [x] Run targeted mobile verification and document the result.
+
+## YT Master Call Keyboard Scroll Review (2026-03-11)
+- Added focused-input keyboard scroll handling in `apps/mobile/app/yt-master-call-settings.tsx` so the active `YT 번호` / `이름` field is pushed above the on-screen keyboard instead of staying hidden under it.
+- Used the `ScrollView` native keyboard scroll responder with a small delayed focus hook and extra offset, which keeps the change local to this screen without changing the broader layout structure.
+- Added `keyboardShouldPersistTaps="handled"` on the settings `ScrollView` so the save/clear controls remain tappable while the keyboard is open.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
 ## YT Master Call Plan (2026-03-11)
 - [x] Re-scan the current Home card, Settings hero card, root stack routes, and existing device/SSE infrastructure to lock the minimal-impact insertion points for the new YT Master Call feature.
 - [x] Add a dedicated persisted YT Master Call store for:
@@ -52,6 +268,26 @@
   - `npm run typecheck`
   - `npm test`
   - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Call Cancel Update Plan (2026-03-11)
+- [x] Re-check the current YT Master Call driver pending-state flow and identify the minimal change needed to support user-initiated cancellation.
+- [x] Add a server-side pending-call cancel action that only the owning YT Driver can trigger.
+- [x] Ensure cancelled calls disappear from the master queue immediately while not surfacing stale resolved history back to the driver screen.
+- [x] Update the driver UI so tapping the pending-status card cancels the current call.
+- [x] Rename the top-left `Yard Master` label to `YT Master` anywhere it appears on the call screens.
+- [x] Add or update tests for the cancel flow and rerun targeted verification.
+
+## YT Master Call Cancel Update Review (2026-03-11)
+- Added driver-owned pending-call cancellation with a new `DELETE /api/yt-master-call/calls/:callId` route and shared cancel input schema.
+- Kept cancelled calls in server state as `cancelled` instead of deleting them outright so the backend can distinguish the latest cancelled call from older approved/rejected history; the driver `currentCall` now hides a latest cancelled call, and the master queue excludes cancelled rows entirely.
+- Broadcast cancellation through the existing `yt_master_call_changed` SSE channel with `type: "cancelled"`, so both driver and master screens refresh immediately and the cancelled pending card disappears from the master's live queue.
+- Updated the driver UI so the lower `호출 대기 중...` card becomes the cancel surface while pending; tapping it now sends cancellation instead of leaving the user stuck in the waiting state.
+- Renamed the top-left branding from `Yard Master` to `YT Master` and aligned the master title to `YT Master (반장)`.
+- Verification:
+  - `npm --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - `npm test`
 
 ## Schedule Relaxed Signal Plan (2026-03-11)
 - [x] Confirm the current relaxed-mode schedule signal logic and identify the narrow condition change needed.
@@ -3143,3 +3379,558 @@
     - [apps/mobile/app/(tabs)/alerts.tsx](C:/coding/gwct/apps/mobile/app/(tabs)/alerts.tsx)
 - Verification:
   - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Peek Transparency Cleanup Plan (2026-03-11)
+- [x] Re-check the just-added peek editor against the user's request for a more minimal transparent popup.
+- [x] Remove the extra helper copy and make the popup surface feel more like a translucent overlay on top of the driver screen.
+- [x] Delete the temporary local video-reference files created for analysis and rerun mobile verification.
+
+## YT Driver Peek Transparency Cleanup Review (2026-03-11)
+- Simplified the driver-number quick editor in `apps/mobile/app/yt-master-call.tsx` by removing the `QUICK EDIT` line and the explanatory helper sentence under the input.
+- Tightened the popup into a cleaner translucent card so more of the underlying driver screen shows through, with lighter overlay dimming and a softer glass-like surface.
+- Deleted the temporary local analysis directory `tasks/video_frames_bug11`; the original user video on `N:` was left untouched.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Artifact Removal Plan (2026-03-11)
+- [x] Re-check the refined peek popup against the screenshot and identify the exact source of the unrelated oval artifacts.
+- [x] Remove the popup-only decorative layers so the translucent card shows only the real driver screen behind it.
+- [x] Re-run targeted mobile verification and document the fix.
+
+## YT Driver Peek Artifact Removal Review (2026-03-11)
+- Root cause: the translucent quick-edit card still contained two absolutely positioned decorative glow views (`driverEditGlowPrimary`, `driverEditGlowSecondary`) that were intended as highlights but read like fake background objects behind `YT-584` and the cancel button.
+- Removed those popup-only glow layers from `apps/mobile/app/yt-master-call.tsx`, so the translucent card now reveals only the actual driver screen underneath.
+- Kept the anchored pop animation and the lightweight glass card treatment intact; the fix is limited to removing the misleading artifact layers.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Native Menu Tuning Plan (2026-03-11)
+- [x] Re-check the quick editor against the user's request for a smaller card with no visible `YT 번호` label.
+- [x] Tighten the popup size and retune the motion toward an iOS context-menu-like anchored pop feel.
+- [x] Re-run targeted mobile verification and document the result.
+
+## YT Driver Peek Native Menu Tuning Review (2026-03-11)
+- Removed the visible `YT 번호` title from the quick editor in `apps/mobile/app/yt-master-call.tsx`, which lets the pop card collapse into a more compact inline editor.
+- Reduced the popup width, paddings, input height, and action-button height so the whole editor reads more like a lightweight context menu than a mini form.
+- Retuned the open/close animation to a shorter anchored spring with less travel and a tighter overshoot, based on the public iOS context-menu interaction pattern rather than a looser modal pop.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Squash Motion Plan (2026-03-11)
+- [x] Re-check the current compact quick editor against the user's request for a more elastic `쭈왑 -> 팡` motion feel.
+- [x] Retune the popup presentation to use a squash-and-release spring closer to current iOS/context-menu-style microinteraction trends.
+- [x] Re-run targeted mobile verification and document the adjustment.
+
+## YT Driver Peek Squash Motion Review (2026-03-11)
+- Retuned the quick-edit popup in `apps/mobile/app/yt-master-call.tsx` from a simple uniform scale pop into a two-phase squash animation:
+  - a brief compressed phase
+  - a short spring release with a small overshoot
+  - a fast settle back to rest
+- Switched the transform to separate `scaleX` and `scaleY` curves so the card now visibly compresses before opening, which reads closer to the current snappy context-menu style the user described.
+- Kept the card compact and titleless from the previous pass; this change is motion-only.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Smoothness Fix Plan (2026-03-11)
+- [x] Re-check why the new squash motion still reads choppy on-device instead of smooth.
+- [x] Remove the abrupt open-phase timing and stop the keyboard autofocus from competing with the popup animation.
+- [x] Re-run targeted mobile verification and document the smoothness fix.
+
+## YT Driver Peek Smoothness Fix Review (2026-03-11)
+- Root cause: the popup used a very short first-stage timing step and also focused the `TextInput` immediately, so the keyboard started animating while the card itself was still opening. That made the pop feel steppy and laggy on-device.
+- Reworked `apps/mobile/app/yt-master-call.tsx` so the popup now opens on a single smoother spring curve, while the `TextInput` focus is delayed briefly until after the visual pop has mostly settled.
+- Kept the compact squash feel, but shifted it onto one continuous UI-thread spring with gentler progress interpolation so the motion reads more like one fluid gesture than two stitched phases.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Close Smoothness Fix Plan (2026-03-11)
+- [x] Re-check whether the remaining close-path jank is caused by popup dismissal and keyboard dismissal happening at the same time.
+- [x] Separate the keyboard-hide phase from the popup close phase so save/cancel do not fight the keyboard animation.
+- [x] Re-run targeted mobile verification and document the result.
+
+## YT Driver Peek Close Smoothness Fix Review (2026-03-11)
+- Root cause: the popup close animation was still starting while the number-pad keyboard was dismissing, so the save/cancel path had the same kind of animation contention that previously affected the open path.
+- Updated `apps/mobile/app/yt-master-call.tsx` so close now:
+  - clears any pending focus timer
+  - blurs/dismisses the keyboard first when needed
+  - waits for `keyboardDidHide` or a short fallback timeout
+  - only then starts the popup close by flipping `driverEditVisible`
+- Applied the same close sequence to backdrop tap, cancel, modal back-close, and successful save so every exit path uses the same smoother shutdown flow.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Peek Close Order Reversal Plan (2026-03-11)
+- [x] Re-check the close-path implementation after the user asked for the popup to disappear before the keyboard starts dismissing.
+- [x] Reverse the shutdown order so the popup visually closes first, then the keyboard dismisses after the popup close animation completes.
+- [x] Re-run targeted mobile verification and document the reversed close-order fix.
+
+## YT Driver Peek Close Order Reversal Review (2026-03-11)
+- Root cause: the previous close fix still prioritized keyboard dismissal, which reduced contention but did not match the requested visual order.
+- Reworked `apps/mobile/app/yt-master-call.tsx` so close now:
+  - marks whether the keyboard should be dismissed after close
+  - immediately starts the popup close animation by flipping `driverEditVisible`
+  - waits for the popup close animation to finish
+  - only then blurs/dismisses the keyboard and unmounts the now-invisible modal shortly after
+- Removed the earlier `keyboardDidHide -> close popup` dependency and kept keyboard listeners only for visibility tracking, so the popup can lead the shutdown sequence cleanly.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Native iPhone Edit Path Plan (2026-03-11)
+- [x] Confirm the closest public/native iPhone interaction available in the current Expo/React Native stack for in-app number editing.
+- [x] Replace the iPhone custom popup flow with a native iOS editing path while leaving the existing custom fallback in place for non-iOS.
+- [x] Re-run targeted mobile verification and document the native-path switch.
+
+## YT Driver Native iPhone Edit Path Review (2026-03-11)
+- Switched the `YT Driver` number-edit interaction on iPhone from the custom animated popup to a native iOS path in `apps/mobile/app/yt-master-call.tsx`.
+- The long-press flow on iOS now uses:
+  - `ActionSheetIOS.showActionSheetWithOptions(...)` for the initial native action menu
+  - `Alert.prompt(...)` for native inline number entry
+- Kept the existing custom popup path as the fallback for non-iOS platforms, so this change is additive rather than deleting the cross-platform editor.
+- Reused a shared `persistDriverYtNumber(...)` helper so both the iPhone native path and the fallback path save through the same registration API and state update logic.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Anchored Native Context Menu Plan (2026-03-11)
+- [x] Install the Expo native UI package that exposes iOS `ContextMenu` support compatible with this SDK.
+- [x] Replace the centered iPhone action sheet path with an anchored native context menu on the top-right driver identity block when the runtime supports it.
+- [x] Keep Expo Go / unsupported runtimes on the previous fallback path, then rerun targeted verification.
+
+## YT Driver Anchored Native Context Menu Review (2026-03-11)
+- Added `@expo/ui` to the mobile workspace so the app can use the native SwiftUI-backed `ContextMenu` implementation on supported iPhone runtimes.
+- Updated `apps/mobile/app/yt-master-call.tsx` so the top-right `YT 번호 / 이름` block now uses an anchored native context menu when:
+  - `Platform.OS === "ios"`
+  - `Constants.executionEnvironment !== StoreClient`
+  - the `@expo/ui/swift-ui` module is available
+- The identity block itself is hosted through `RNHostView` inside the native context-menu trigger, so the menu opens near that exact top-right block instead of appearing as a centered action sheet.
+- Selecting `YT 번호 변경` from that anchored native menu still uses the existing iPhone-native `Alert.prompt(...)` entry step to capture the new number.
+- Expo Go remains on the earlier fallback path because Expo's native UI context menu is not available there.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+## YT Driver Peek Animation Refinement Plan (2026-03-11)
+- [x] Re-check the current long-press driver-number editor and the reference video's popup motion/style.
+- [x] Restyle the popup into a darker anchored quick-edit card with a pop-in animation closer to the reference.
+- [x] Re-run targeted mobile verification and document the result.
+
+## YT Driver Peek Animation Refinement Review (2026-03-11)
+- Refined `apps/mobile/app/yt-master-call.tsx` so the long-press driver-number editor now opens with a short anchored peek-and-pop motion instead of a plain fade modal.
+- Kept the edit flow intact while changing the presentation to a dark glass-like quick-edit card with stronger shadow, soft highlight glows, and a dedicated `YT-` input frame.
+- Added open/close animation state so the card scales and rises in, then closes cleanly instead of disappearing abruptly.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Native Edit Rollback Plan (2026-03-11)
+- [x] Re-check the recent native iPhone context-menu additions and isolate only the code needed to revert.
+- [x] Restore the earlier custom driver-number popup path while keeping the improved popup-first-close keyboard behavior.
+- [x] Remove the now-unused native menu dependency and rerun mobile verification.
+
+## YT Driver Native Edit Rollback Review (2026-03-11)
+- Rolled `apps/mobile/app/yt-master-call.tsx` back from the native iPhone menu experiment to the prior custom long-press popup flow.
+- Kept the popup close sequence that was already working better:
+  - the popup close animation starts immediately
+  - the keyboard dismisses only after the popup close finishes
+- Removed the temporary native edit branches:
+  - `ActionSheetIOS`
+  - `Alert.prompt(...)`
+  - `@expo/ui` anchored context-menu runtime
+- Removed the unused `@expo/ui` dependency from `apps/mobile/package.json` and lockfile.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Repo Cleanup Inspection Plan (2026-03-11)
+- [x] Inspect the repository for large temporary/generated artifacts that are not required for runtime or source history.
+- [x] Remove only safe cleanup targets such as export output, scratch folders, and obvious transient files.
+- [x] Verify what changed and document the cleanup result.
+
+## Repo Cleanup Inspection Review (2026-03-11)
+- Checked the repo for large non-runtime artifacts outside source and normal assets.
+- Removed safe transient/generated folders:
+  - `apps/mobile/dist-test` (`expo export` output, about `8.28 MB`)
+  - `apps/mobile/.expo` (local Expo metadata)
+  - `node_modules/.cache` (tooling cache, about `38.3 MB`)
+- Verified the cleanup by re-checking path existence and ignored-file status.
+- Remaining biggest file is still `apps/server/data/dev.db` (`45.33 MB`), which is local server runtime data rather than disposable test output, so it was intentionally kept.
+
+## YT Driver Tractor Subreason Plan (2026-03-11)
+- [x] Inspect the current YT Master call reason schema, storage, and render path across shared, mobile, and server layers.
+- [x] Add a long-press tractor-inspection subreason picker on the YT Driver screen and persist the selected detail on created calls.
+- [x] Show the selected tractor subreason in the driver/master call UI, then run verification and document the result.
+
+## YT Driver Tractor Subreason Review (2026-03-11)
+- Extended the shared YT Master call schema with tractor-inspection detail support:
+  - fixed tractor detail enum/list
+  - optional `reasonDetailCode` / `reasonDetailLabel`
+  - shared display formatter for `기본 사유 · 세부 사유`
+- Updated the YT Master call service so tractor-inspection calls persist the chosen detail and old stored state still loads safely with `null` defaults.
+- Updated the driver screen in `apps/mobile/app/yt-master-call.tsx`:
+  - `트랙터 점검` tap still selects the general tractor reason
+  - `트랙터 점검` long-press opens a dedicated detail picker modal
+  - choosing a detail sets the tractor reason plus the selected detail
+  - pending-driver UI now shows the detailed tractor reason when present
+- Updated the master queue and create-call push payloads so masters see `트랙터 점검 · 세부 사유` instead of losing the detail.
+- Added regression coverage for detailed tractor calls in both service and API tests.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Driver Tractor Picker Layout Refinement Plan (2026-03-11)
+- [x] Re-check the current tractor subreason picker modal and identify why the full-width list wastes space.
+- [x] Replace the vertical list with a compact grouped chip layout so related reasons stay physically close.
+- [x] Verify the mobile build, document the refinement, and record the layout lesson.
+
+## YT Driver Tractor Picker Layout Refinement Review (2026-03-11)
+- Reworked the tractor subreason picker in `apps/mobile/app/yt-master-call.tsx` from a full-width vertical list into grouped wrapped chips.
+- Grouped related reasons so similar inspections stay visually near each other:
+  - tire / bolt
+  - oil / leak / fuel
+  - engine / start / cooling
+  - cabin / electrical
+  - safety / exterior / structure
+- Within each group, items are sorted by their Korean labels so the scan order stays predictable while avoiding the wasted height of one-card-per-row.
+- Reduced vertical bulk by switching from long horizontal cards to content-width chips and keeping only subtle group captions.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Driver Tractor Label Wording Review (2026-03-11)
+- Updated the shared tractor subreason labels in `packages/shared/src/schemas/domain.ts` so these four items now read with `보충`:
+  - `엔진오일 보충`
+  - `미션오일 보충`
+  - `작동유 보충`
+  - `파워오일 보충`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Tractor Group Order Review (2026-03-11)
+- Adjust the oil/leak/fuel group ordering so the `보충` items stay adjacent and `에어누설` sits last in that cluster.
+- Re-run mobile typecheck after the order change.
+
+## YT Driver Tractor Group Order Result (2026-03-11)
+- Removed the picker's extra intra-group auto-sort so each tractor group now respects the explicit semantic order defined in `apps/mobile/app/yt-master-call.tsx`.
+- Updated the `오일 / 누유 / 연료` cluster so the four `보충` items stay adjacent and `에어누설` renders last in that group.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Safety Group Order Review (2026-03-11)
+- Updated the shared `seatbelt` label to `안전벨트 고장` in `packages/shared/src/schemas/domain.ts`.
+- Reordered the `안전 / 외관 / 하부` tractor group in `apps/mobile/app/yt-master-call.tsx` to this sequence:
+  - `유리창 파손`
+  - `탑 틸팅 안됨`
+  - `판스프링 3장 이상 파손`
+  - `백미러 교체`
+  - `백미러 볼트 쪼이기`
+  - `안전벨트 고장`
+  - `판스프링 이퀄라이저 이탈`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Tractor Picker Packing Plan (2026-03-11)
+- [x] Re-check the tractor subreason chip layout with the current grouping and identify where chip order is creating unnecessary extra wrap rows.
+- [x] Reorder the grouped chips to pack the modal more tightly without changing chip sizing/typography, and rename `냉각수` to `냉각수 보충`.
+- [x] Re-run verification and document the packing-focused layout correction.
+
+## YT Driver Tractor Picker Packing Review (2026-03-11)
+- Updated the shared tractor label map so `냉각수` now renders as `냉각수 보충` in every YT Master call surface.
+- Kept the chip size and typography intact, but tightened only the picker packing values in `apps/mobile/app/yt-master-call.tsx`:
+  - group-to-group gap reduced
+  - within-group vertical gap reduced
+  - chip wrap gap reduced
+- This keeps the same chip design while making the tractor picker noticeably denser so all items are more likely to fit without scrolling.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - confirmed regenerated `apps/mobile/dist-test` was removed after verification
+
+## YT Driver Safety Chip Packing Review (2026-03-11)
+- Reordered the `안전 / 외관 / 하부` chip sequence in `apps/mobile/app/yt-master-call.tsx` so `백미러 교체` now sits immediately after `탑 틸팅 안됨` to pack that row more tightly.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Emergency Direct Call Plan (2026-03-11)
+- [x] Inspect the current YT Master call reason model and the idle driver-screen layout to place an emergency direct-call affordance cleanly.
+- [x] Add a distinct emergency accident reason across shared/server/mobile and wire a red direct-call control that submits immediately.
+- [x] Verify driver/master rendering plus targeted tests/typechecks, then document the change.
+
+## YT Driver Emergency Direct Call Review (2026-03-11)
+- Added a new shared YT Master call reason `emergency_accident` so the server, live state, and push payloads can all carry a distinct emergency label instead of overloading the normal reason chips.
+- Kept the normal driver reason picker focused on selectable reasons and added a separate red `긴급 사고 직접 호출` card under the regular status area in `apps/mobile/app/yt-master-call.tsx`.
+- Wired that emergency card to submit immediately without opening the tractor-detail flow, while the master queue now renders the emergency call with a siren icon and emergency-red accent instead of the generic fallback icon.
+- Added targeted server regression coverage so emergency calls are verified to:
+  - persist with `긴급 사고` as the reason label
+  - carry no tractor detail
+  - push the emergency body text to master devices
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Driver Other Detail Reason Plan (2026-03-11)
+- [x] Inspect the current shared reason-detail model and the existing long-press picker flow to define how `기타 사유` details should be stored and shown.
+- [x] Add grouped `기타 사유` detail options across shared/server/mobile so long-pressing `기타 사유` opens a compact detail picker and the selected detail appears in driver/master views.
+- [x] Run targeted server/mobile verification and record the result.
+
+## YT Driver Other Detail Reason Review (2026-03-11)
+- Expanded the shared YT Master call detail model in `packages/shared/src/schemas/domain.ts` so `reasonDetailCode` can now carry either:
+  - tractor inspection details
+  - grouped `기타 사유` details
+- Added a new `기타 사유` detail set including:
+  - 개인 / 일정
+  - GC 캐빈 고발 (`GC181` ~ `GC190`)
+  - 노매너 / 고발
+  - 위험 / 현장
+  - 셔틀 / 작업 종료
+- Updated `apps/mobile/app/yt-master-call.tsx` so:
+  - tapping `기타 사유` still selects the plain top-level reason
+  - long-pressing `기타 사유` opens a grouped chip picker, just like tractor details
+  - the chosen detail is shown in the driver's summary text and then sent with the call
+- Updated the server YT Master call service so detail labels are resolved generically from the shared helper rather than only from tractor-specific labels.
+- Added targeted regression coverage for a detailed `기타 사유` call (`GC181 캐빈 고발`) in both service and API tests, including the push body text sent to master devices.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Driver Other Detail Label Packing Plan (2026-03-11)
+- [x] Re-check the current `기타 사유` labels and grouped chip rows to identify the shortest wording changes that reclaim space without touching font or chip styling.
+- [x] Shorten the requested GC/report/yard labels and adjust only local grouping wording/order if that helps the same chips fit on one screen.
+- [x] Run targeted verification and record the correction.
+
+## YT Driver Other Detail Label Packing Review (2026-03-11)
+- Shortened the shared `기타 사유` detail labels in `packages/shared/src/schemas/domain.ts` without changing any chip sizing or typography:
+  - `GC181 캐빈 고발` ~ `GC190 캐빈 고발` -> `GC181 고발` ~ `GC190 고발`
+  - `TC 노매너 고발` / `리치 노매너 고발` / `언더 노매너 고발` -> `TC 고발` / `리치 고발` / `언더 고발`
+  - `야드 컨테이너 1열의 1단 돌출` -> `야드 컨테이너 1열 돌출`
+- Shortened only the local picker group captions in `apps/mobile/app/yt-master-call.tsx` where it helps density:
+  - `GC 캐빈 고발` -> `GC 고발`
+  - `노매너 / 고발` -> `고발`
+- Kept the chip font, padding, and overall picker design unchanged so the visual system stays the same while the copy takes less space.
+- Updated the detailed `기타 사유` server expectations so the stored label and master push body now match the shorter wording.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Driver Danger Label Tightening Plan (2026-03-11)
+- [x] Re-check the current `위험 / 현장` chip labels and confirm the shortest safe wording change that could pull the row onto one screen without changing chip design.
+- [x] Update only the requested danger label text, keeping font size, padding, and chip styling untouched, and adjust expectations if any shared-string checks depend on it.
+- [x] Run targeted verification and document the result.
+
+## YT Driver Danger Label Tightening Review (2026-03-11)
+- Shortened only the requested shared danger label in `packages/shared/src/schemas/domain.ts`:
+  - `야드 컨테이너 1열 돌출` -> `컨테이너 돌출`
+- Kept the existing chip font size, chip padding, chip layout, and grouped picker design intact. This change only reclaims width through shorter copy.
+- Re-ran the mobile iOS bundle path after the shared string update to confirm the picker still builds cleanly with no design-code changes.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## Vessel Schedule Date Wording Plan (2026-03-11)
+- [x] Find the current vessel schedule change formatter that uses different wording when ETA/ETB/ETD shifts across calendar days.
+- [x] Simplify the wording so all date/time shifts use the same `종전보다 ...` style regardless of whether the date changed.
+- [x] Run targeted verification and record the wording correction.
+
+## Vessel Schedule Date Wording Review (2026-03-11)
+- Simplified the shared ETA-change formatter in `packages/shared/src/events/eta.ts` so the human message no longer switches to relative-day wording like `내일로 ...` when the date rolls over.
+- `crossedDate` is still preserved in the payload, but the visible message is now always:
+  - `종전보다 ... 더 일찍 입항 예정입니다.`
+  - `종전보다 ... 더 늦게 입항 예정입니다.`
+- Root cause of the user's follow-up was a second path: previously stored ETA adjustment records and older alert payloads were still reusing their saved `humanMessage` strings. Updated `monitorService` and `vessels/liveRows` to re-normalize those older records from `deltaMinutes` at read/decorate time, so existing `어제로 ...` / `내일로 ...` strings no longer leak back into the UI.
+- Updated the ETA monitor and vessel live-row regression expectations so next-day changes now assert the unified `종전보다 ...` phrasing instead of the old relative-day copy.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-eta-monitor.test.ts tests/monitor-service-eta-adjustment.test.ts tests/vessels-live-rows.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Driver Detail Summary Reset Plan (2026-03-11)
+- [x] Inspect the current driver-side selected-detail summary rendering and the create/cancel success paths to confirm why the gray summary line persists after a call.
+- [x] Clear the selected tractor/other detail state after successful call creation and after successful cancel so the inline gray detail line disappears again.
+- [x] Run targeted mobile verification and record the correction.
+
+## YT Driver Detail Summary Reset Review (2026-03-11)
+- The gray inline detail summary on the driver screen was being rendered from local selection state (`selectedTractorSubreasonCode` / `selectedOtherSubreasonCode`), and those values were not being cleared after a successful create or cancel.
+- Updated `apps/mobile/app/yt-master-call.tsx` so successful:
+  - `createYtMasterCall(...)`
+  - `cancelYtMasterCall(...)`
+  now both call the same local detail-reset helper before updating live state.
+- This keeps the actual pending/resolved call reason intact in the status card and master queue, but removes the old pre-call helper summary line once the operator has already sent or cancelled the call.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Message-Only Reason Flow Plan (2026-03-11)
+- [x] Inspect the current YT Master call status model, driver pending UI, and master approval/rejection flow to find the cleanest place to split approval-type calls from acknowledgement-only message items.
+- [x] Implement an acknowledgement-only path for the requested `기타 사유` details so drivers send a one-way message receipt instead of entering pending approval, and masters get a single confirm action that clears the item.
+- [x] Run targeted server/mobile verification and document the workflow change.
+
+## YT Message-Only Reason Flow Review (2026-03-11)
+- Expanded the shared YT Master call state model in `packages/shared/src/schemas/domain.ts` so selected `기타 사유` detail reasons can enter a `message` handling mode and use `sent -> acknowledged` instead of the normal `pending -> approved/rejected` flow.
+- Updated `apps/server/src/services/ytMasterCall/service.ts` so:
+  - message-only details are stored as `handlingMode: "message"` and `status: "sent"`
+  - driver cancel remains limited to real pending approval calls
+  - masters can only `acknowledge` message items, while normal calls still allow only `approved/rejected`
+- Updated `apps/server/src/routes/api.ts` so master confirmation of a message-only item:
+  - still broadcasts `yt_master_call_changed` for UI refresh
+  - does not emit `yt_master_call_resolved`
+  - does not send driver approval/rejection push notifications
+- Updated `apps/mobile/app/yt-master-call.tsx` so:
+  - driver screens show a message receipt card instead of the waiting loader for message-only items
+  - those message receipts do not block sending later calls
+  - master queue cards show a single `확인` button for message-only items and keep approve/reject only for real decision calls
+- Added regression coverage for message-only `기타 사유` creation and acknowledgement in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - remove regenerated `apps/mobile/dist-test` after verification
+
+## YT Message-Only Container + Wheel Detail Plan (2026-03-11)
+- [x] Inspect the current shared YT tractor detail list and the message-only `기타 사유` set to confirm where `바퀴 빠짐` and `컨테이너 돌출` should be wired.
+- [x] Add `바퀴 빠짐` to the tractor inspection detail definitions and picker group, and lock `컨테이너 돌출` into the message-only flow with explicit regression coverage.
+- [x] Re-run the focused YT server/mobile verification path and record the result.
+
+## YT Message-Only Container + Wheel Detail Review (2026-03-11)
+- Added the new tractor inspection detail `바퀴 빠짐` in `packages/shared/src/schemas/domain.ts` so it now exists in:
+  - the shared tractor subreason enum
+  - the shared tractor subreason option list
+  - the shared tractor subreason label map
+- Updated the `타이어 / 볼트` tractor picker group in `apps/mobile/app/yt-master-call.tsx` so `바퀴 빠짐` appears alongside the existing tire-related inspection reasons.
+- Confirmed `컨테이너 돌출` remains part of the message-only `기타 사유` set and added explicit regression coverage so that flow is now locked in tests instead of only implied by the shared set.
+- Added targeted verification cases in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  covering:
+  - tractor detail storage for `바퀴 빠짐`
+  - message-only creation for `컨테이너 돌출`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Oil-Leak Label Packing Plan (2026-03-11)
+- [x] Re-check the current shared tractor leak labels to confirm which wording change can reclaim width without touching chip design.
+- [x] Keep `에어누설` as a no-space label and shorten only `하부 누유` to `하부누유` at the shared source so the chips can pack tighter on one row.
+- [x] Run targeted shared/server/mobile verification and record the wording correction.
+
+## YT Oil-Leak Label Packing Review (2026-03-11)
+- Re-checked the shared tractor leak labels in `packages/shared/src/schemas/domain.ts` and confirmed `air_leak` was already rendered as the requested no-space `에어누설`.
+- Updated only `undercarriage_oil_leak` from `하부 누유` to `하부누유` at the shared label source, leaving chip sizing, font size, and layout code untouched.
+- This keeps the existing design intact while reducing label width enough for tighter one-line packing in the oil/leak group.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Oil-Leak Final Width Trim Plan (2026-03-11)
+- [x] Re-check whether the leak-group order already places the last two chips as `하부누유 -> 에어...` before changing any layout code.
+- [x] Shorten only the shared `air_leak` label to `에어누공`, keeping the existing last-position order and leaving chip design untouched.
+- [x] Run targeted type verification and record the final wording correction.
+
+## YT Oil-Leak Final Width Trim Review (2026-03-11)
+- Confirmed the `오일 / 누유 / 연료` group in `apps/mobile/app/yt-master-call.tsx` already ends with:
+  - `하부누유`
+  - `에어...`
+  so no picker reordering was needed.
+- Updated only the shared `air_leak` label in `packages/shared/src/schemas/domain.ts` from `에어누설` to `에어누공`.
+- Left the font, chip size, wrap gap, and all other layout values unchanged. This change relies purely on the shorter label width to help `하부누유` and `에어누공` fit on the same final row.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Oil-Leak Same-Row Packing Plan (2026-03-11)
+- [x] Re-check whether the requested final row already has the correct item order and isolate the remaining width problem to copy length rather than layout.
+- [x] Tighten only the shared wording needed so `파워오일보충 주유 하부누유 에어누공` can pack onto the same final row without changing chip styling or font.
+- [x] Run targeted verification and document the correction.
+
+## YT Oil-Leak Same-Row Packing Review (2026-03-11)
+- Re-checked the `오일 / 누유 / 연료` group in `apps/mobile/app/yt-master-call.tsx` and confirmed the last four chips were already ordered correctly for the requested final row:
+  - `power_oil`
+  - `fueling`
+  - `undercarriage_oil_leak`
+  - `air_leak`
+- That meant the remaining problem was width, not row order. Updated only the shared `power_oil` label in `packages/shared/src/schemas/domain.ts` from `파워오일 보충` to `파워오일보충`.
+- Left chip size, font size, padding, gap, and group order untouched. This change relies purely on the shorter label width to help the final four chips fit together on one row.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Tractor Message-Only Detail Plan (2026-03-11)
+- [x] Inspect the current shared handling-mode helper and tractor detail definitions to locate the cleanest place to classify message-only tractor subreasons.
+- [x] Extend the shared handling-mode logic so the requested tractor details use the message-only flow, then update the affected server/API regression expectations.
+- [x] Run focused verification and document the behavior change.
+
+## YT Tractor Message-Only Detail Review (2026-03-11)
+- Extended the shared handling-mode source in `packages/shared/src/schemas/domain.ts` with a dedicated tractor message-only set covering:
+  - `시동꺼짐`
+  - `시동불량`
+  - `무전기 불량`
+  - `배터리 방전`
+  - `블랙박스`
+  - `졸음 방지기`
+  - `안전벨트 고장`
+  - `바퀴 빠짐`
+- Updated `getYtMasterCallHandlingMode(...)` so those `tractor_inspection` detail codes now resolve to `handlingMode: "message"` and therefore create calls as `status: "sent"` instead of `pending`.
+- The existing driver/master YT UI already consumed `handlingMode` generically, so no additional screen logic was needed:
+  - driver shows the message receipt card
+  - master shows `확인` instead of `승인/거절`
+- Updated regression coverage so tractor message-only behavior is now pinned in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Message Acknowledgement Driver Feedback Plan (2026-03-11)
+- [x] Trace the message-only acknowledgement path to confirm whether the driver receives a resolved event, notification, auto-open, and a visible acknowledged state.
+- [x] Update the shared service/API/mobile flow so a master `확인` action notifies the driver, auto-opens `YT Driver` from other screens, and leaves an acknowledged message card on the driver screen.
+- [x] Re-run focused server/mobile verification, then clean generated artifacts and document the final behavior.
+
+## YT Message Acknowledgement Driver Feedback Review (2026-03-11)
+- Confirmed the original gap came from two places:
+  - `yt_master_call_resolved` was only broadcast for `approved/rejected`, so message-only acknowledgements never reused the existing driver-side alert + auto-open path.
+  - the YT service hid `acknowledged` calls from the driver's live state, so the driver screen had nothing to render after the master pressed `확인`.
+- Updated `apps/server/src/routes/api.ts` so `acknowledged` decisions now:
+  - broadcast `yt_master_call_changed` with `type: "acknowledged"`
+  - also broadcast `yt_master_call_resolved`
+  - dispatch a driver push/local-notification payload titled `메시지 확인`
+  - keep `deepLink: "yt-master-call"`, `forcePresentation: true`, and `autoOpen: true`
+- Updated `apps/server/src/services/ytMasterCall/service.ts` so the driver's latest call stays visible when its status becomes `acknowledged`, while the master queue still clears acknowledged items.
+- Updated `apps/mobile/app/yt-master-call.tsx` so the driver screen renders a dedicated acknowledged card with the copy `메시지가 확인되었습니다.`
+- Reused the existing notification route handling in `apps/mobile/app/_layout.tsx`, so when the driver is on another screen the resolved acknowledgement alert can still surface and auto-open `/yt-master-call`.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification

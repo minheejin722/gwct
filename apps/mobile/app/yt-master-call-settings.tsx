@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -27,6 +31,9 @@ function masterSlotText(data: YtMasterCallLiveState | null): string {
   return `${used}/2 slots in use`;
 }
 
+const FOCUSED_INPUT_KEYBOARD_GAP = 24;
+const FOCUSED_INPUT_SCROLL_DELAY_MS = 64;
+
 export default function YtMasterCallSettingsScreen() {
   const { deviceId, isReady } = useLocalDeviceId();
 
@@ -46,6 +53,13 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
   const { colors } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const scrollRef = useRef<ScrollView | null>(null);
+  const ytNumberFieldRef = useRef<View | null>(null);
+  const nameFieldRef = useRef<View | null>(null);
+  const focusedFieldRef = useRef<View | null>(null);
+  const scrollOffsetYRef = useRef(0);
+  const keyboardFrameYRef = useRef(Number.POSITIVE_INFINITY);
+  const keyboardVisibleRef = useRef(false);
+  const focusScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { data, loading, error, refresh, setData } = useEndpoint<YtMasterCallLiveState>(API_URLS.ytMasterCallLive(deviceId));
   const [selectedRole, setSelectedRole] = useState<YtMasterCallRole>("driver");
   const [nameInput, setNameInput] = useState("");
@@ -56,6 +70,42 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
   useHeaderScrollToTop(["yt-master-call-settings"], scrollRef);
 
   useEffect(() => {
+    return () => {
+      if (focusScrollTimeoutRef.current) {
+        clearTimeout(focusScrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const keyboardShowEvent = "keyboardDidShow";
+    const keyboardHideEvent = "keyboardDidHide";
+
+    const handleKeyboardShow = (event: { endCoordinates: { screenY: number } }) => {
+      keyboardVisibleRef.current = true;
+      keyboardFrameYRef.current = event.endCoordinates.screenY;
+      scheduleFocusedFieldScroll();
+    };
+
+    const handleKeyboardHide = () => {
+      keyboardVisibleRef.current = false;
+      keyboardFrameYRef.current = Number.POSITIVE_INFINITY;
+      if (focusScrollTimeoutRef.current) {
+        clearTimeout(focusScrollTimeoutRef.current);
+        focusScrollTimeoutRef.current = null;
+      }
+    };
+
+    const showSub = Keyboard.addListener(keyboardShowEvent, handleKeyboardShow);
+    const hideSub = Keyboard.addListener(keyboardHideEvent, handleKeyboardHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!data?.registration) {
       return;
     }
@@ -63,6 +113,46 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
     setNameInput(data.registration.name);
     setYtNumberInput(data.registration.ytNumber ? data.registration.ytNumber.replace(/^YT-/, "") : "");
   }, [data?.registration]);
+
+  const ensureFocusedFieldVisible = (target: View | null) => {
+    if (!target || !scrollRef.current || !keyboardVisibleRef.current) {
+      return;
+    }
+
+    target.measureInWindow((_x, y, _width, height) => {
+      if (!height) {
+        return;
+      }
+
+      const overlap = y + height - (keyboardFrameYRef.current - FOCUSED_INPUT_KEYBOARD_GAP);
+      if (overlap <= 0) {
+        return;
+      }
+
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, scrollOffsetYRef.current + overlap),
+        animated: true,
+      });
+    });
+  };
+
+  const scheduleFocusedFieldScroll = (target: View | null = focusedFieldRef.current) => {
+    focusedFieldRef.current = target;
+    if (!target) {
+      return;
+    }
+    if (focusScrollTimeoutRef.current) {
+      clearTimeout(focusScrollTimeoutRef.current);
+    }
+    focusScrollTimeoutRef.current = setTimeout(() => {
+      ensureFocusedFieldVisible(target);
+      focusScrollTimeoutRef.current = null;
+    }, FOCUSED_INPUT_SCROLL_DELAY_MS);
+  };
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetYRef.current = event.nativeEvent.contentOffset.y;
+  };
 
   const saveRole = async () => {
     setSaving(true);
@@ -122,6 +212,11 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
       ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
+      automaticallyAdjustKeyboardInsets
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      keyboardShouldPersistTaps="handled"
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} />}
     >
       <View style={styles.heroCard}>
@@ -192,11 +287,12 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{selectedRole === "master" ? "YT Master 등록" : "YT Driver 등록"}</Text>
         {selectedRole === "driver" ? (
-          <View style={styles.formGroup}>
+          <View ref={ytNumberFieldRef} style={styles.formGroup}>
             <Text style={styles.inputLabel}>YT 번호</Text>
             <TextInput
               value={ytNumberInput}
               onChangeText={setYtNumberInput}
+              onFocus={() => scheduleFocusedFieldScroll(ytNumberFieldRef.current)}
               placeholder="예: 45"
               placeholderTextColor={colors.secondaryText}
               style={styles.input}
@@ -204,11 +300,12 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
             />
           </View>
         ) : null}
-        <View style={styles.formGroup}>
+        <View ref={nameFieldRef} style={styles.formGroup}>
           <Text style={styles.inputLabel}>이름</Text>
           <TextInput
             value={nameInput}
             onChangeText={setNameInput}
+            onFocus={() => scheduleFocusedFieldScroll(nameFieldRef.current)}
             placeholder={selectedRole === "master" ? "반장 이름" : "기사 이름"}
             placeholderTextColor={colors.secondaryText}
             style={styles.input}

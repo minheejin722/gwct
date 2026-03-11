@@ -1,5 +1,8 @@
 import {
+  getYtMasterCallHandlingMode,
+  getYtMasterCallReasonDetailLabel,
   YT_MASTER_CALL_REASON_LABELS,
+  type YtMasterCallCancelInput,
   type YtMasterCallCreateInput,
   type YtMasterCallDecisionInput,
   type YtMasterCallLiveState,
@@ -60,6 +63,10 @@ function compareIsoAsc(left: string, right: string): number {
   return new Date(left).getTime() - new Date(right).getTime();
 }
 
+function compareIsoDesc(left: string, right: string): number {
+  return compareIsoAsc(right, left);
+}
+
 function compareSlotAsc(
   left: YtMasterCallMasterAssignment,
   right: YtMasterCallMasterAssignment,
@@ -92,18 +99,24 @@ function buildAvailableMasterSlots(registrations: YtMasterCallRegistration[]): Y
 }
 
 function buildCurrentCall(state: YtMasterCallStoredState, deviceId: string): YtMasterCallQueueEntry | null {
-  const ownCalls = state.calls
+  const latestCall = state.calls
     .filter((call) => call.driverDeviceId === deviceId)
-    .sort((left, right) => compareIsoAsc(right.createdAt, left.createdAt));
-  return ownCalls[0] || null;
+    .sort((left, right) => compareIsoDesc(left.createdAt, right.createdAt))[0];
+
+  if (!latestCall || latestCall.status === "cancelled") {
+    return null;
+  }
+
+  return latestCall;
 }
 
 function buildMasterQueue(state: YtMasterCallStoredState): YtMasterCallQueueEntry[] {
-  const pending = state.calls
-    .filter((call) => call.status === "pending")
+  const visible = state.calls.filter((call) => call.status !== "cancelled" && call.status !== "acknowledged");
+  const pending = visible
+    .filter((call) => call.status === "pending" || call.status === "sent")
     .sort((left, right) => compareIsoAsc(left.createdAt, right.createdAt));
-  const resolved = state.calls
-    .filter((call) => call.status !== "pending")
+  const resolved = visible
+    .filter((call) => call.status !== "pending" && call.status !== "sent")
     .sort((left, right) => compareIsoAsc(left.createdAt, right.createdAt));
   return [...pending, ...resolved];
 }
@@ -118,7 +131,7 @@ function buildLiveStateFromState(state: YtMasterCallStoredState, deviceId: strin
     availableMasterSlots: buildAvailableMasterSlots(state.registrations),
     currentCall: buildCurrentCall(state, deviceId),
     queue: registration?.role === "master" ? buildMasterQueue(state) : [],
-    pendingCount: state.calls.filter((call) => call.status === "pending").length,
+    pendingCount: state.calls.filter((call) => call.status === "pending" || call.status === "sent").length,
   };
 }
 
@@ -142,7 +155,9 @@ export async function saveYtMasterCallRegistration(
     if (input.role === "master") {
       const name = normalizeName(input.name);
       const currentSlot = existing?.role === "master" ? existing.masterSlot : null;
-      const availableSlots = buildAvailableMasterSlots(current.registrations.filter((item) => item.deviceId !== input.deviceId));
+      const availableSlots = buildAvailableMasterSlots(
+        current.registrations.filter((item) => item.deviceId !== input.deviceId),
+      );
       const assignedSlot = currentSlot || availableSlots[0] || null;
       if (!assignedSlot) {
         throw new YtMasterCallServiceError(409, "YT Master 자리가 모두 사용 중입니다.");
@@ -168,12 +183,11 @@ export async function saveYtMasterCallRegistration(
       };
     }
 
-    const registrations = current.registrations
-      .filter((registration) => registration.deviceId !== input.deviceId)
-      .concat(nextRegistration);
     const nextState: YtMasterCallStoredState = {
       ...current,
-      registrations,
+      registrations: current.registrations
+        .filter((registration) => registration.deviceId !== input.deviceId)
+        .concat(nextRegistration),
     };
 
     return {
@@ -201,6 +215,7 @@ export async function clearYtMasterCallRegistration(deviceId: string): Promise<Y
       ...current,
       registrations: current.registrations.filter((registration) => registration.deviceId !== deviceId),
     };
+
     return {
       state: nextState,
       result: buildLiveStateFromState(nextState, deviceId),
@@ -219,6 +234,7 @@ export async function createYtMasterCall(input: YtMasterCallCreateInput): Promis
     }
 
     const now = new Date().toISOString();
+    const handlingMode = getYtMasterCallHandlingMode(input.reasonCode, input.reasonDetailCode);
     const call: YtMasterCallQueueEntry = {
       id: uid("yt_master_call"),
       driverDeviceId: registration.deviceId,
@@ -226,20 +242,74 @@ export async function createYtMasterCall(input: YtMasterCallCreateInput): Promis
       ytNumber: registration.ytNumber,
       reasonCode: input.reasonCode,
       reasonLabel: YT_MASTER_CALL_REASON_LABELS[input.reasonCode],
-      status: "pending",
+      reasonDetailCode:
+        input.reasonCode === "tractor_inspection" || input.reasonCode === "other"
+          ? input.reasonDetailCode || null
+          : null,
+      reasonDetailLabel: getYtMasterCallReasonDetailLabel(input.reasonCode, input.reasonDetailCode),
+      handlingMode,
+      status: handlingMode === "message" ? "sent" : "pending",
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
       resolvedByDeviceId: null,
       resolvedByName: null,
     };
+
     const nextState: YtMasterCallStoredState = {
       ...current,
       calls: current.calls.concat(call),
     };
+
     return {
       state: nextState,
       result: buildLiveStateFromState(nextState, input.deviceId),
+    };
+  });
+}
+
+export async function cancelYtMasterCall(
+  callId: string,
+  input: YtMasterCallCancelInput,
+): Promise<{ liveState: YtMasterCallLiveState; call: YtMasterCallQueueEntry }> {
+  return mutateYtMasterCallState(async (current) => {
+    const registration = current.registrations.find((item) => item.deviceId === input.deviceId);
+    if (!registration || registration.role !== "driver") {
+      throw new YtMasterCallServiceError(403, "YT Driver 권한이 필요합니다.");
+    }
+
+    const target = current.calls.find((call) => call.id === callId);
+    if (!target) {
+      throw new YtMasterCallServiceError(404, "호출 정보를 찾을 수 없습니다.");
+    }
+    if (target.driverDeviceId !== input.deviceId) {
+      throw new YtMasterCallServiceError(403, "본인 호출만 취소할 수 있습니다.");
+    }
+    if (target.status !== "pending") {
+      throw new YtMasterCallServiceError(409, "대기 중인 호출만 취소할 수 있습니다.");
+    }
+
+    const now = new Date().toISOString();
+    const cancelledCall: YtMasterCallQueueEntry = {
+      ...target,
+      status: "cancelled",
+      updatedAt: now,
+      resolvedAt: now,
+      resolvedByDeviceId: input.deviceId,
+      resolvedByName: registration.name,
+    };
+
+    const nextState: YtMasterCallStoredState = {
+      ...current,
+      calls: current.calls.map((call) => (call.id === callId ? cancelledCall : call)),
+    };
+
+    return {
+      state: nextState,
+      result: {
+        liveState: buildLiveStateFromState(nextState, input.deviceId),
+        call: cancelledCall,
+      },
     };
   });
 }
@@ -258,8 +328,24 @@ export async function decideYtMasterCall(
     if (!target) {
       throw new YtMasterCallServiceError(404, "호출 정보를 찾을 수 없습니다.");
     }
-    if (target.status !== "pending") {
+    if (target.status !== "pending" && target.status !== "sent") {
       throw new YtMasterCallServiceError(409, "이미 처리된 호출입니다.");
+    }
+
+    if (target.handlingMode === "message") {
+      if (target.status !== "sent") {
+        throw new YtMasterCallServiceError(409, "이미 처리된 호출입니다.");
+      }
+      if (input.status !== "acknowledged") {
+        throw new YtMasterCallServiceError(409, "메시지 접수는 확인만 가능합니다.");
+      }
+    } else {
+      if (target.status !== "pending") {
+        throw new YtMasterCallServiceError(409, "이미 처리된 호출입니다.");
+      }
+      if (input.status === "acknowledged") {
+        throw new YtMasterCallServiceError(409, "승인형 호출은 확인 처리할 수 없습니다.");
+      }
     }
 
     const now = new Date().toISOString();
@@ -271,6 +357,7 @@ export async function decideYtMasterCall(
       resolvedByDeviceId: registration.deviceId,
       resolvedByName: registration.name,
     };
+
     const nextState: YtMasterCallStoredState = {
       ...current,
       calls: current.calls.map((call) => (call.id === callId ? updatedCall : call)),

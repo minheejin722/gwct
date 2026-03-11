@@ -71,27 +71,29 @@ function formatDuration(deltaMinutes: number): string {
   return `${hours}시간 ${minutes}분`;
 }
 
-function formatRelativeDayLabel(dayShift: number): string {
-  if (dayShift === 1) {
-    return "내일";
-  }
-  if (dayShift === 2) {
-    return "모레";
-  }
-  if (dayShift > 2) {
-    return `${dayShift}일 뒤`;
-  }
-  if (dayShift === -1) {
-    return "어제";
-  }
-  if (dayShift === -2) {
-    return "그제";
-  }
-  return `${Math.abs(dayShift)}일 전`;
+function buildGwctEtaBaseMessage(deltaMinutes: number): string {
+  const duration = formatDuration(deltaMinutes);
+  return deltaMinutes < 0
+    ? `종전보다 ${duration} 더 일찍 입항 예정입니다.`
+    : `종전보다 ${duration} 더 늦게 입항 예정입니다.`;
 }
 
-export function formatGwctEtaAdjustmentMessage(humanMessage: string, adjustmentCount: number): string {
-  const baseMessage = humanMessage.replace(ETA_ADJUSTMENT_SUFFIX_PATTERN, "").trim();
+export function normalizeGwctEtaHumanMessage(
+  humanMessage: string,
+  deltaMinutes?: number | null,
+): string {
+  if (typeof deltaMinutes === "number" && Number.isFinite(deltaMinutes) && deltaMinutes !== 0) {
+    return buildGwctEtaBaseMessage(deltaMinutes);
+  }
+  return humanMessage.replace(ETA_ADJUSTMENT_SUFFIX_PATTERN, "").trim();
+}
+
+export function formatGwctEtaAdjustmentMessage(
+  humanMessage: string,
+  adjustmentCount: number,
+  deltaMinutes?: number | null,
+): string {
+  const baseMessage = normalizeGwctEtaHumanMessage(humanMessage, deltaMinutes);
   if (!Number.isInteger(adjustmentCount) || adjustmentCount < 2) {
     return baseMessage;
   }
@@ -115,20 +117,8 @@ export function summarizeGwctEtaChange(previousEta: string, currentEta: string):
   const direction: GwctEtaChangeDirection = deltaMinutes < 0 ? "earlier" : "later";
   const previousDate = toUtcDateIndex(previous);
   const currentDate = toUtcDateIndex(current);
-  const dayShift = currentDate - previousDate;
-  const crossedDate = dayShift !== 0;
-  const duration = formatDuration(deltaMinutes);
-
-  let humanMessage: string;
-  if (direction === "earlier" && !crossedDate) {
-    humanMessage = `종전보다 ${duration} 더 일찍 입항 예정입니다.`;
-  } else if (direction === "later" && !crossedDate) {
-    humanMessage = `종전보다 ${duration} 더 늦게 입항 예정입니다.`;
-  } else if (direction === "earlier") {
-    humanMessage = `${formatRelativeDayLabel(dayShift)}로 ${duration} 더 일찍 입항 예정입니다.`;
-  } else {
-    humanMessage = `${formatRelativeDayLabel(dayShift)}로 ${duration} 더 늦게 입항 예정입니다.`;
-  }
+  const crossedDate = currentDate !== previousDate;
+  const humanMessage = buildGwctEtaBaseMessage(deltaMinutes);
 
   return {
     previousEta,

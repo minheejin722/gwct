@@ -1031,6 +1031,23 @@ export class Repository {
     });
   }
 
+  async listDevicesByIds(deviceIds: string[]) {
+    const normalized = [...new Set(deviceIds.map((deviceId) => deviceId.trim()).filter(Boolean))];
+    if (!normalized.length) {
+      return [];
+    }
+
+    return prisma.deviceRegistration.findMany({
+      where: {
+        deviceId: {
+          in: normalized,
+        },
+        alertsEnabled: true,
+        NOT: { expoPushToken: null },
+      },
+    });
+  }
+
   async logNotification(input: {
     eventId: string;
     category: EventCategory;

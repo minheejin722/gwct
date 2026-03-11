@@ -1,5 +1,5 @@
-import { Stack, router } from "expo-router";
-import { useEffect, useRef } from "react";
+import { Stack, router, usePathname } from "expo-router";
+import { useCallback, useEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { Platform, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -17,27 +17,146 @@ interface LiveAlertMessage {
   message: string;
 }
 
+interface YtMasterCallChangedMessage {
+  eventId?: string;
+  type?: string;
+  masterDeviceIds?: string[];
+  title?: string;
+  message?: string;
+}
+
+interface YtMasterCallResolvedMessage {
+  eventId?: string;
+  driverDeviceId?: string;
+  title?: string;
+  message?: string;
+}
+
 const localSseAlertsEnabled = process.env.EXPO_PUBLIC_LOCAL_SSE_ALERTS !== "false";
 const REF_CALL_HEADER = {
   background: "#ececf1",
   text: "#0d0d0f",
 };
+const YT_MASTER_CALL_ROUTE = "/yt-master-call";
+const YT_MASTER_CALL_DEEP_LINK = "yt-master-call";
+const NOTIFICATION_ROUTE_BY_DEEP_LINK = {
+  home: "/",
+  vessels: "/vessels",
+  cranes: "/cranes",
+  equipment: "/equipment",
+  yt: "/yt",
+  weather: "/weather",
+  alerts: "/alerts",
+  settings: "/settings",
+  "yt-master-call": YT_MASTER_CALL_ROUTE,
+} as const;
+
+function resolveNotificationRoute(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const deepLink = (data as Record<string, unknown>).deepLink;
+  if (typeof deepLink !== "string") {
+    return null;
+  }
+
+  return NOTIFICATION_ROUTE_BY_DEEP_LINK[deepLink as keyof typeof NOTIFICATION_ROUTE_BY_DEEP_LINK] || null;
+}
+
+function extractNotificationEventId(data: unknown, fallbackId?: string): string {
+  if (data && typeof data === "object") {
+    const eventId = (data as Record<string, unknown>).eventId;
+    if (typeof eventId === "string" && eventId.trim().length) {
+      return eventId.trim();
+    }
+  }
+  return fallbackId?.trim() || "notification";
+}
+
+function shouldAutoOpenNotificationRoute(data: unknown, route: string | null): boolean {
+  if (!route) {
+    return false;
+  }
+  if (route === YT_MASTER_CALL_ROUTE) {
+    return true;
+  }
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+  return (data as Record<string, unknown>).autoOpen === true;
+}
 
 function AppShell() {
   const { alertsEnabled, resolvedTheme, colors } = useAppPreferences();
-  const lastSeenEventIdRef = useRef<string | null>(null);
-  const lastSeenYtCallEventIdRef = useRef<string | null>(null);
+  const pathname = usePathname();
   const deviceIdRef = useRef<string | null>(null);
+  const lastSeenEventIdRef = useRef<string | null>(null);
+  const lastHandledNotificationEventRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     void localDeviceId().then((deviceId) => {
-      deviceIdRef.current = deviceId;
+      if (active) {
+        deviceIdRef.current = deviceId;
+      }
     });
+    return () => {
+      active = false;
+    };
   }, []);
 
+  const openNotificationRoute = useCallback(
+    async (data: unknown, fallbackId?: string, options?: { clearLastResponse?: boolean; autoOnly?: boolean }) => {
+      const route = resolveNotificationRoute(data);
+      if (!route) {
+        return;
+      }
+      if (options?.autoOnly && !shouldAutoOpenNotificationRoute(data, route)) {
+        return;
+      }
+
+      const eventId = extractNotificationEventId(data, fallbackId);
+      if (lastHandledNotificationEventRef.current === eventId) {
+        if (options?.clearLastResponse) {
+          await Notifications.clearLastNotificationResponseAsync();
+        }
+        return;
+      }
+      lastHandledNotificationEventRef.current = eventId;
+
+      if (pathname !== route) {
+        router.push(route as Parameters<typeof router.push>[0]);
+      }
+
+      if (options?.clearLastResponse) {
+        await Notifications.clearLastNotificationResponseAsync();
+      }
+    },
+    [pathname],
+  );
+
+  const handleNotificationResponse = useCallback(
+    async (response: Notifications.NotificationResponse | null) => {
+      if (!response) {
+        return;
+      }
+
+      await openNotificationRoute(response.notification.request.content.data, response.notification.request.identifier, {
+        clearLastResponse: true,
+      });
+    },
+    [openNotificationRoute],
+  );
+
   useEffect(() => {
-    const receivedSub = Notifications.addNotificationReceivedListener(() => {
-      // Foreground notification side effects can be added here.
+    const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+      void openNotificationRoute(notification.request.content.data, notification.request.identifier, {
+        autoOnly: true,
+      });
+    });
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      void handleNotificationResponse(response);
     });
 
     let es: EventSource | null = null;
@@ -45,19 +164,26 @@ function AppShell() {
       eventId: string,
       title: string,
       body: string,
-      forcePresentation = false,
+      options?: {
+        forcePresentation?: boolean;
+        deepLink?: string;
+        autoOpen?: boolean;
+      },
     ) => {
       const preferredSound = resolveNotificationSound();
+      const data = {
+        eventId,
+        forcePresentation: options?.forcePresentation === true,
+        ...(options?.deepLink ? { deepLink: options.deepLink } : {}),
+        ...(options?.autoOpen ? { autoOpen: true } : {}),
+      };
       try {
         await Notifications.scheduleNotificationAsync({
           content: {
             title,
             body,
             sound: preferredSound,
-            data: {
-              eventId,
-              forcePresentation,
-            },
+            data,
           },
           trigger: null,
         });
@@ -67,10 +193,7 @@ function AppShell() {
             title,
             body,
             sound: "default",
-            data: {
-              eventId,
-              forcePresentation,
-            },
+            data,
           },
           trigger: null,
         });
@@ -95,38 +218,81 @@ function AppShell() {
       }
     };
 
+    const onYtMasterCallChanged = (event: { data?: string }) => {
+      if (!event.data) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.data) as YtMasterCallChangedMessage;
+        if (parsed.type !== "created") {
+          return;
+        }
+
+        const currentDeviceId = deviceIdRef.current;
+        const targetDeviceIds = Array.isArray(parsed.masterDeviceIds)
+          ? parsed.masterDeviceIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          : [];
+        if (!currentDeviceId || !targetDeviceIds.includes(currentDeviceId)) {
+          return;
+        }
+
+        const eventId = extractNotificationEventId(parsed, "yt-master-call-created");
+        void scheduleLocalNotification(
+          eventId,
+          parsed.title || "\uBC18\uC7A5 \uD638\uCD9C \uC811\uC218",
+          parsed.message || "\uC0C8 \uBC18\uC7A5 \uD638\uCD9C\uC774 \uB3C4\uCC29\uD588\uC2B5\uB2C8\uB2E4.",
+          {
+            forcePresentation: true,
+            deepLink: YT_MASTER_CALL_DEEP_LINK,
+            autoOpen: true,
+          },
+        );
+        void openNotificationRoute(
+          {
+            eventId,
+            deepLink: YT_MASTER_CALL_DEEP_LINK,
+            autoOpen: true,
+          },
+          eventId,
+          { autoOnly: true },
+        );
+      } catch {
+        // Ignore malformed payloads during hot-reload or server restart.
+      }
+    };
+
     const onYtMasterCallResolved = (event: { data?: string }) => {
       if (!event.data) {
         return;
       }
 
       try {
-        const parsed = JSON.parse(event.data) as {
-          eventId?: string;
-          driverDeviceId?: string;
-          title?: string;
-          message?: string;
-          callId?: string;
-          status?: string;
-        };
+        const parsed = JSON.parse(event.data) as YtMasterCallResolvedMessage;
         const currentDeviceId = deviceIdRef.current;
         if (!currentDeviceId || parsed.driverDeviceId !== currentDeviceId) {
           return;
         }
 
-        const eventId =
-          parsed.eventId ||
-          `yt_master_call:${parsed.callId || "unknown"}:${parsed.status || "updated"}`;
-        if (lastSeenYtCallEventIdRef.current === eventId) {
-          return;
-        }
-        lastSeenYtCallEventIdRef.current = eventId;
-
+        const eventId = extractNotificationEventId(parsed, "yt-master-call-resolved");
         void scheduleLocalNotification(
           eventId,
-          parsed.title || "반장 호출 상태 변경",
-          parsed.message || "반장 호출 상태가 변경되었습니다.",
-          true,
+          parsed.title || "\uBC18\uC7A5 \uD638\uCD9C \uC0C1\uD0DC \uBCC0\uACBD",
+          parsed.message || "\uBC18\uC7A5 \uD638\uCD9C \uC0C1\uD0DC\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
+          {
+            forcePresentation: true,
+            deepLink: YT_MASTER_CALL_DEEP_LINK,
+            autoOpen: true,
+          },
+        );
+        void openNotificationRoute(
+          {
+            eventId,
+            deepLink: YT_MASTER_CALL_DEEP_LINK,
+            autoOpen: true,
+          },
+          eventId,
+          { autoOnly: true },
         );
       } catch {
         // Ignore malformed payloads during hot-reload or server restart.
@@ -136,18 +302,25 @@ function AppShell() {
     if (localSseAlertsEnabled) {
       es = new EventSource(API_URLS.sse);
       es.addEventListener("alert" as any, onAlert as any);
+      es.addEventListener("yt_master_call_changed" as any, onYtMasterCallChanged as any);
       es.addEventListener("yt_master_call_resolved" as any, onYtMasterCallResolved as any);
     }
 
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      void handleNotificationResponse(response);
+    });
+
     return () => {
       receivedSub.remove();
+      responseSub.remove();
       if (es) {
         es.removeEventListener("alert" as any, onAlert as any);
+        es.removeEventListener("yt_master_call_changed" as any, onYtMasterCallChanged as any);
         es.removeEventListener("yt_master_call_resolved" as any, onYtMasterCallResolved as any);
         es.close();
       }
     };
-  }, [alertsEnabled]);
+  }, [alertsEnabled, handleNotificationResponse, openNotificationRoute]);
 
   return (
     <>
@@ -218,7 +391,13 @@ function AppShell() {
         <Stack.Screen
           name="yt-master-call"
           options={{
-            headerTitle: () => <HeaderScrollTitle routeKey="yt-master-call" title="반장 호출" color={REF_CALL_HEADER.text} />,
+            headerTitle: () => (
+              <HeaderScrollTitle
+                routeKey="yt-master-call"
+                title={"\uBC18\uC7A5 \uD638\uCD9C"}
+                color={REF_CALL_HEADER.text}
+              />
+            ),
             headerStyle: { backgroundColor: REF_CALL_HEADER.background },
             headerTintColor: REF_CALL_HEADER.text,
             headerShadowVisible: false,

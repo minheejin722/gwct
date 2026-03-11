@@ -14,7 +14,7 @@ const EnvSchema = z.object({
   DEBUG_TOKEN: z.string().default("changeme"),
   GWCT_INTERVAL_MS: z.coerce.number().default(2000),
   GWCT_GC_INTERVAL_MS: z.coerce.number().default(2000),
-  YS_INTERVAL_MS: z.coerce.number().default(10000),
+  YS_INTERVAL_MS: z.coerce.number().default(60000),
   MAX_RETRIES: z.coerce.number().default(2),
   BACKOFF_BASE_MS: z.coerce.number().default(1000),
   JITTER_MS: z.coerce.number().default(250),

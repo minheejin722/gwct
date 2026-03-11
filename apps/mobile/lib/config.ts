@@ -26,6 +26,8 @@ export const API_URLS = {
   ytMasterCallClear: (deviceId: string) =>
     `${API_BASE_URL}/api/yt-master-call/register/${encodeURIComponent(deviceId)}`,
   ytMasterCallCalls: `${API_BASE_URL}/api/yt-master-call/calls`,
+  ytMasterCallCancel: (callId: string) =>
+    `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}`,
   ytMasterCallDecision: (callId: string) =>
     `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}/decision`,
   registerDevice: `${API_BASE_URL}/api/devices/register`,

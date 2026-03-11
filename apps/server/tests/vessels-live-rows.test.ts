@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { AlertEvent, VesselScheduleItem } from "@gwct/shared";
 import { buildVesselLiveRows } from "../src/services/vessels/liveRows.js";
 
+function toUtcMinutes(value: string): number {
+  const [datePart, timePart] = value.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day, hour, minute) / 60000);
+}
+
+function toUtcDateIndex(value: string): number {
+  const [datePart] = value.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
 function vessel(input: {
   vesselKey: string;
   vesselName: string;
@@ -38,6 +51,7 @@ function vessel(input: {
 }
 
 function etaAlert(vesselKey: string, previousEta: string, currentEta: string, humanMessage: string): AlertEvent {
+  const deltaMinutes = toUtcMinutes(currentEta) - toUtcMinutes(previousEta);
   return {
     id: `evt:${vesselKey}`,
     category: "VESSEL",
@@ -51,9 +65,9 @@ function etaAlert(vesselKey: string, previousEta: string, currentEta: string, hu
       vesselKey,
       previousEta,
       currentEta,
-      deltaMinutes: 120,
-      direction: "later",
-      crossedDate: true,
+      deltaMinutes,
+      direction: deltaMinutes < 0 ? "earlier" : "later",
+      crossedDate: toUtcDateIndex(currentEta) !== toUtcDateIndex(previousEta),
       humanMessage,
     },
     occurredAt: "2026-03-07T00:05:00.000Z",
@@ -99,14 +113,14 @@ describe("vessel live rows", () => {
 
     const result = buildVesselLiveRows(
       rows,
-      [etaAlert("SWSI-0002", "2026-03-06T14:00", "2026-03-07T16:00", "내일로 26시간 더 늦게 입항 예정입니다.")],
+      [etaAlert("SWSI-0002", "2026-03-06T14:00", "2026-03-07T16:00", "종전보다 26시간 더 늦게 입항 예정입니다.")],
     );
 
     expect(result[0]?.latestEtaChange).toMatchObject({
       eventId: "evt:SWSI-0002",
       previousEtaDisplay: "2026/03/06 14:00",
       currentEtaDisplay: "2026/03/07 16:00",
-      humanMessage: "내일로 26시간 더 늦게 입항 예정입니다.",
+      humanMessage: "종전보다 26시간 더 늦게 입항 예정입니다.",
     });
   });
 
@@ -146,6 +160,42 @@ describe("vessel live rows", () => {
       eventId: "evt:SWSI-0002",
       adjustmentCount: 2,
       humanMessage: "종전보다 1시간 더 늦게 입항 예정입니다. 2번째 조정",
+    });
+  });
+
+  it("normalizes persisted cross-day wording back to 종전보다 when reading eta adjustment records", () => {
+    const rows = [
+      vessel({
+        vesselKey: "SWAL-0003",
+        vesselName: "SAWASDEE ALTAIR",
+        voyage: "SWAL-0003",
+        eta: "2026-03-10T06:30:00.000Z",
+        etd: "2026-03-10T17:00:00.000Z",
+        watchIndex: 1,
+        rowColor: "yellow",
+      }),
+    ];
+
+    const result = buildVesselLiveRows(rows, [], [
+      {
+        vesselKey: "SWAL-0003",
+        vesselName: "SAWASDEE ALTAIR",
+        voyage: "SWAL-0003",
+        occurredAt: "2026-03-11T00:05:00.000Z",
+        previousEta: "2026-03-11T02:00",
+        currentEta: "2026-03-10T00:30",
+        deltaMinutes: -90,
+        direction: "earlier",
+        crossedDate: true,
+        humanMessage: "어제로 1시간 30분 더 일찍 입항 예정입니다.",
+        adjustmentCount: 1,
+      },
+    ]);
+
+    expect(result[0]?.latestEtaChange).toMatchObject({
+      humanMessage: "종전보다 1시간 30분 더 일찍 입항 예정입니다.",
+      crossedDate: true,
+      deltaMinutes: -90,
     });
   });
 });

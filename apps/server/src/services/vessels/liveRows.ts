@@ -99,7 +99,7 @@ function buildLatestEtaChangeMap(alerts: AlertEvent[]): Map<string, LatestEtaCha
         ? payload.adjustmentCount
         : (adjustmentCounts.get(vesselKey) || 1);
     const humanMessage = rawHumanMessage
-      ? formatGwctEtaAdjustmentMessage(rawHumanMessage, adjustmentCount)
+      ? formatGwctEtaAdjustmentMessage(rawHumanMessage, adjustmentCount, deltaMinutes)
       : null;
 
     if (!previousEta || !currentEta || deltaMinutes === null || !direction || !humanMessage) {
@@ -140,7 +140,7 @@ function buildLatestEtaChangeMapFromRecords(
       deltaMinutes: record.deltaMinutes,
       direction: record.direction,
       crossedDate: record.crossedDate,
-      humanMessage: formatGwctEtaAdjustmentMessage(record.humanMessage, record.adjustmentCount),
+      humanMessage: formatGwctEtaAdjustmentMessage(record.humanMessage, record.adjustmentCount, record.deltaMinutes),
       adjustmentCount: record.adjustmentCount,
     });
   }

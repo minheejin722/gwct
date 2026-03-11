@@ -10,6 +10,7 @@ export const DeepLinkTargetSchema = z.enum([
   "weather",
   "alerts",
   "settings",
+  "yt-master-call",
 ]);
 export type DeepLinkTarget = z.infer<typeof DeepLinkTargetSchema>;
 

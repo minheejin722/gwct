@@ -1,9 +1,11 @@
 ﻿import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   DeviceRegistrationSchema,
+  formatYtMasterCallReasonDisplay,
   type AlertEvent,
   type SourceId,
   type YTUnitSnapshot,
+  YtMasterCallCancelInputSchema,
   YtMasterCallCreateInputSchema,
   YtMasterCallDecisionInputSchema,
   YtMasterCallRegistrationInputSchema,
@@ -14,6 +16,7 @@ import type { Repository } from "../db/repository.js";
 import type { MonitorService } from "../services/monitorService.js";
 import type { SseHub } from "../lib/sse.js";
 import type { DataRetentionService } from "../services/cleanup/service.js";
+import type { NotificationService } from "../notifications/service.js";
 import { env } from "../config/env.js";
 import { SOURCE_DEFINITIONS } from "../scraper/sources.js";
 import { loadGcLatestSnapshot } from "../services/gc/latestStore.js";
@@ -40,6 +43,7 @@ import { loadVesselEtaAdjustmentRecords } from "../services/vessels/etaAdjustmen
 import { buildVesselLiveRows } from "../services/vessels/liveRows.js";
 import { buildYtUnitSnapshotFromEquipment } from "../services/equipment/ytUnits.js";
 import {
+  cancelYtMasterCall,
   clearYtMasterCallRegistration,
   createYtMasterCall,
   decideYtMasterCall,
@@ -53,6 +57,7 @@ interface RouteDeps {
   monitorService: MonitorService;
   sseHub: SseHub;
   cleanupService: DataRetentionService;
+  notificationService?: Pick<NotificationService, "dispatchToDeviceIds">;
 }
 
 async function recoverYtWorkSessionFromEquipmentHistory(repo: Repository, asOf: string): Promise<void> {
@@ -685,13 +690,83 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
 
     try {
       const liveState = await createYtMasterCall(parsed.data);
+      const createdReasonText = liveState.currentCall
+        ? formatYtMasterCallReasonDisplay(
+            liveState.currentCall.reasonLabel,
+            liveState.currentCall.reasonDetailLabel,
+          )
+        : null;
       deps.sseHub.broadcast("yt_master_call_changed", {
         type: "created",
         deviceId: parsed.data.deviceId,
+        driverDeviceId: liveState.currentCall?.driverDeviceId || parsed.data.deviceId,
         callId: liveState.currentCall?.id || null,
+        eventId: liveState.currentCall
+          ? `yt_master_call:${liveState.currentCall.id}:created:${liveState.currentCall.updatedAt}`
+          : null,
+        title: liveState.currentCall ? "반장 호출 접수" : null,
+        message: liveState.currentCall
+          ? `${liveState.currentCall.ytNumber} ${liveState.currentCall.driverName} ${createdReasonText}`
+          : null,
+        masterDeviceIds: liveState.masterAssignments.map((assignment) => assignment.deviceId),
         changedAt: liveState.currentCall?.updatedAt || new Date().toISOString(),
       });
+
+      if (liveState.currentCall) {
+        await deps.notificationService?.dispatchToDeviceIds({
+          eventId: `yt_master_call:${liveState.currentCall.id}:created:${liveState.currentCall.updatedAt}`,
+          category: "YT",
+          eventType: "yt_master_call_created",
+          deepLink: "yt-master-call",
+          title: "반장 호출 접수",
+          body: `${liveState.currentCall.ytNumber} ${liveState.currentCall.driverName} ${createdReasonText}`,
+          deviceIds: liveState.masterAssignments.map((assignment) => assignment.deviceId),
+          forcePresentation: true,
+          autoOpen: true,
+          entityKey: liveState.currentCall.id,
+          raw: {
+            callId: liveState.currentCall.id,
+            driverDeviceId: liveState.currentCall.driverDeviceId,
+            driverName: liveState.currentCall.driverName,
+            ytNumber: liveState.currentCall.ytNumber,
+            reasonCode: liveState.currentCall.reasonCode,
+            reasonLabel: liveState.currentCall.reasonLabel,
+            reasonDetailCode: liveState.currentCall.reasonDetailCode,
+            reasonDetailLabel: liveState.currentCall.reasonDetailLabel,
+            status: liveState.currentCall.status,
+            createdAt: liveState.currentCall.createdAt,
+          },
+        });
+      }
       return liveState;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
+  });
+
+  app.delete("/api/yt-master-call/calls/:callId", async (request, reply) => {
+    const params = request.params as { callId?: string };
+    const callId = typeof params.callId === "string" ? params.callId.trim() : "";
+    if (!callId) {
+      return reply.code(400).send({ error: "callId is required" });
+    }
+
+    const parsed = YtMasterCallCancelInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    try {
+      const result = await cancelYtMasterCall(callId, parsed.data);
+      deps.sseHub.broadcast("yt_master_call_changed", {
+        type: "cancelled",
+        deviceId: parsed.data.deviceId,
+        driverDeviceId: result.call.driverDeviceId,
+        callId: result.call.id,
+        status: result.call.status,
+        changedAt: result.call.updatedAt,
+      });
+      return result;
     } catch (error) {
       return sendYtMasterCallError(reply, error);
     }
@@ -712,7 +787,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     try {
       const result = await decideYtMasterCall(callId, parsed.data);
       deps.sseHub.broadcast("yt_master_call_changed", {
-        type: "resolved",
+        type: result.call.status === "acknowledged" ? "acknowledged" : "resolved",
         deviceId: parsed.data.deviceId,
         driverDeviceId: result.call.driverDeviceId,
         callId: result.call.id,
@@ -720,21 +795,69 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         changedAt: result.call.updatedAt,
       });
 
-      const resolvedLabel = result.call.status === "approved" ? "승인" : "거절";
-      deps.sseHub.broadcast("yt_master_call_resolved", {
-        eventId: `yt_master_call:${result.call.id}:${result.call.status}:${result.call.updatedAt}`,
-        callId: result.call.id,
-        driverDeviceId: result.call.driverDeviceId,
-        status: result.call.status,
-        title: `반장 호출 ${resolvedLabel}`,
-        message:
+      if (
+        result.call.status === "approved" ||
+        result.call.status === "rejected" ||
+        result.call.status === "acknowledged"
+      ) {
+        const resolvedLabel =
+          result.call.status === "approved"
+            ? "승인"
+            : result.call.status === "rejected"
+              ? "거절"
+              : "확인";
+        const resolvedMessage =
           result.call.status === "approved"
             ? `${result.call.ytNumber} ${result.call.driverName} 호출이 승인되었습니다.`
-            : `${result.call.ytNumber} ${result.call.driverName} 호출이 거절되었습니다.`,
-        resolvedByName: result.call.resolvedByName,
-        reasonLabel: result.call.reasonLabel,
-        updatedAt: result.call.updatedAt,
-      });
+            : result.call.status === "rejected"
+              ? `${result.call.ytNumber} ${result.call.driverName} 호출이 거절되었습니다.`
+              : `${result.call.ytNumber} ${result.call.driverName} 메시지가 확인되었습니다.`;
+        deps.sseHub.broadcast("yt_master_call_resolved", {
+          eventId: `yt_master_call:${result.call.id}:${result.call.status}:${result.call.updatedAt}`,
+          callId: result.call.id,
+          driverDeviceId: result.call.driverDeviceId,
+          deepLink: "yt-master-call",
+          forcePresentation: true,
+          autoOpen: true,
+          status: result.call.status,
+          title: result.call.status === "acknowledged" ? "메시지 확인" : `반장 호출 ${resolvedLabel}`,
+          message: resolvedMessage,
+          resolvedByName: result.call.resolvedByName,
+          reasonLabel: result.call.reasonLabel,
+          updatedAt: result.call.updatedAt,
+        });
+
+        await deps.notificationService?.dispatchToDeviceIds({
+          eventId: `yt_master_call:${result.call.id}:${result.call.status}:${result.call.updatedAt}`,
+          category: "YT",
+          eventType:
+            result.call.status === "approved"
+              ? "yt_master_call_approved"
+              : result.call.status === "rejected"
+                ? "yt_master_call_rejected"
+                : "yt_master_call_acknowledged",
+          deepLink: "yt-master-call",
+          title: result.call.status === "acknowledged" ? "메시지 확인" : `반장 호출 ${resolvedLabel}`,
+          body: resolvedMessage,
+          deviceIds: [result.call.driverDeviceId],
+          forcePresentation: true,
+          autoOpen: true,
+          entityKey: result.call.id,
+          raw: {
+            callId: result.call.id,
+            driverDeviceId: result.call.driverDeviceId,
+            driverName: result.call.driverName,
+            ytNumber: result.call.ytNumber,
+            reasonCode: result.call.reasonCode,
+            reasonLabel: result.call.reasonLabel,
+            reasonDetailCode: result.call.reasonDetailCode,
+            reasonDetailLabel: result.call.reasonDetailLabel,
+            status: result.call.status,
+            resolvedByName: result.call.resolvedByName,
+            updatedAt: result.call.updatedAt,
+          },
+        });
+      }
 
       return result;
     } catch (error) {

@@ -146,7 +146,7 @@ export default function HomeScreen() {
           <View style={styles.summaryRow}>
             <FontAwesome5 name="user-tie" size={14} color={colors.icon} />
             <Text style={styles.summaryText}>
-              예선 상태{" "}
+              도선 상태{" "}
               <Text
                 style={{
                   color: data?.weatherState === "none" ? colors.success : colors.danger,

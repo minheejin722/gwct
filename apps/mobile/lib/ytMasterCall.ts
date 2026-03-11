@@ -1,4 +1,5 @@
 import type {
+  YtMasterCallCancelInput,
   YtMasterCallCreateInput,
   YtMasterCallDecisionInput,
   YtMasterCallLiveState,
@@ -32,6 +33,17 @@ export async function createYtMasterCall(
 ): Promise<YtMasterCallLiveState> {
   return fetchJson<YtMasterCallLiveState>(API_URLS.ytMasterCallCalls, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function cancelYtMasterCall(
+  callId: string,
+  input: YtMasterCallCancelInput,
+): Promise<{ liveState: YtMasterCallLiveState }> {
+  return fetchJson<{ liveState: YtMasterCallLiveState }>(API_URLS.ytMasterCallCancel(callId), {
+    method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });

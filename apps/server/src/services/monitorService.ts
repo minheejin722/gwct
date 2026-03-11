@@ -619,13 +619,14 @@ export class MonitorService {
     const vesselName = typeof event.payload.vesselName === "string" ? event.payload.vesselName.trim() : "";
     const baseHumanMessage =
       typeof event.payload.humanMessage === "string" ? event.payload.humanMessage : null;
+    const deltaMinutes = typeof event.payload.deltaMinutes === "number" ? event.payload.deltaMinutes : null;
 
     if (!vesselKey || !baseHumanMessage) {
       return event;
     }
 
     const adjustmentCount = (await this.repo.countGwctEtaAdjustments(vesselKey)) + 1;
-    const humanMessage = formatGwctEtaAdjustmentMessage(baseHumanMessage, adjustmentCount);
+    const humanMessage = formatGwctEtaAdjustmentMessage(baseHumanMessage, adjustmentCount, deltaMinutes);
 
     return {
       ...event,

@@ -58,7 +58,7 @@ describe("gwct eta monitor payload and message rules", () => {
     expect(String(earlierEvents[0]?.payload.humanMessage || "")).toContain("30분");
   });
 
-  it("includes both next-day label and duration in rollover delay message", () => {
+  it("keeps the same 종전보다 wording even when ETA rolls into the next day", () => {
     const events = detectGwctEtaChangedEvents(
       [vessel("VOY3", "2026-03-04T23:30")],
       [vessel("VOY3", "2026-03-05T00:20")],
@@ -70,7 +70,7 @@ describe("gwct eta monitor payload and message rules", () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.payload.direction).toBe("later");
     expect(events[0]?.payload.crossedDate).toBe(true);
-    expect(String(events[0]?.payload.humanMessage || "")).toBe("내일로 50분 더 늦게 입항 예정입니다.");
+    expect(String(events[0]?.payload.humanMessage || "")).toBe("종전보다 50분 더 늦게 입항 예정입니다.");
   });
 
   it("skips event when previous ETA is missing", () => {
