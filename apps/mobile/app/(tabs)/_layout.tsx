@@ -1,34 +1,34 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { useRef } from "react";
 import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Animated, GestureResponderEvent, Pressable, StyleSheet } from "react-native";
+import { CranesTabSvgIcon } from "../../components/CranesTabSvgIcon";
 import { HeaderScrollTitle } from "../../components/HeaderScrollTitle";
 import { useAppPreferences } from "../../lib/appPreferences";
 import { emitTabScrollToTop } from "../../lib/tabScrollToTop";
 
 type TabIconName = ComponentProps<typeof Ionicons>["name"];
+type TabIconRenderer = ({ color, focused }: { color: string; focused: boolean }) => ReactElement;
 
-type TabIconConfig = {
-  active: TabIconName;
-  inactive: TabIconName;
-  size: number;
-};
+function buildIoniconRenderer(active: TabIconName, inactive: TabIconName, size: number): TabIconRenderer {
+  return ({ color, focused }) => <Ionicons name={focused ? active : inactive} size={size} color={color} />;
+}
 
-const TAB_ICONS: Record<string, TabIconConfig> = {
-  index: { active: "home", inactive: "home-outline", size: 24 },
-  "monitor-tab": { active: "grid", inactive: "grid-outline", size: 24 },
-  worktime: { active: "person", inactive: "person-outline", size: 26 },
-  "status-tab": { active: "construct", inactive: "construct-outline", size: 24 },
-  settings: { active: "settings", inactive: "settings-outline", size: 24 },
+const TAB_ICONS: Record<string, TabIconRenderer> = {
+  index: buildIoniconRenderer("home", "home-outline", 24),
+  "monitor-tab": buildIoniconRenderer("grid", "grid-outline", 24),
+  worktime: buildIoniconRenderer("person", "person-outline", 26),
+  "status-tab": ({ color }) => <CranesTabSvgIcon color={color} size={26} />,
+  settings: buildIoniconRenderer("settings", "settings-outline", 24),
 };
 
 const TAB_TITLES: Record<string, string> = {
   index: "Home",
   "monitor-tab": "Monitoring",
   worktime: "Work",
-  "status-tab": "Status",
+  "status-tab": "Cranes",
   settings: "Settings",
   alerts: "Events",
 };
@@ -169,12 +169,6 @@ function TabBarButton(
   );
 }
 
-function buildTabIcon(config: TabIconConfig) {
-  return ({ color, focused }: { color: string; focused: boolean }) => (
-    <Ionicons name={focused ? config.active : config.inactive} size={config.size} color={color} />
-  );
-}
-
 export default function TabLayout() {
   const { colors } = useAppPreferences();
   const styles = createStyles(colors);
@@ -196,7 +190,7 @@ export default function TabLayout() {
             ? undefined
             : () => <HeaderScrollTitle routeKey={route.name} title={TAB_TITLES[route.name] || route.name} color={colors.primaryText} />,
         tabBarButton: (props) => <TabBarButton {...props} colors={colors} />,
-        tabBarIcon: buildTabIcon(TAB_ICONS[route.name] || TAB_ICONS.index),
+        tabBarIcon: TAB_ICONS[route.name] || TAB_ICONS.index,
       })}
     >
       <Tabs.Screen
@@ -247,7 +241,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="status-tab"
         options={{
-          title: "Status",
+          title: "Cranes",
           headerStyle: { backgroundColor: colors.screenBackground },
           headerTintColor: colors.primaryText,
           headerTitleStyle: { color: colors.primaryText, fontWeight: "700" },

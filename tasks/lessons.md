@@ -1,5 +1,9 @@
 ﻿# Lessons
 
+## 2026-03-13
+- If the user provides an exact local SVG asset for a UI icon, stop searching icon libraries and wire that asset in directly before proposing alternatives. Preserve the supplied geometry and only adapt tint/size if needed for the existing UI state model.
+- If a supplied SVG icon looks too faint beside filled tab-bar icons, first increase its stroke weight and small filled details inside the same SVG before changing the overall design or searching for a different icon.
+
 ## 2026-03-11
 - For phone forms inside a `ScrollView`, do not rely on static bottom padding to keep low `TextInput` fields visible. If operators type near the bottom of the screen, wire focus-driven keyboard scrolling so the active field moves above the iPhone keyboard with a bit of extra clearance.
 - For iPhone keyboard avoidance in React Native forms, do not assume `scrollResponderScrollNativeHandleToKeyboard` alone will visibly move fields on-device. Pair real keyboard insets with measured overlap-based `scrollTo(...)` logic that uses the keyboard frame and current scroll offset.

@@ -4484,3 +4484,29 @@
   - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
   - `npm.cmd --workspace @gwct/server run typecheck`
   - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Bottom Tab SVG Crane Plan (2026-03-13)
+- [x] Inspect the provided `c:\yadong\반장\5.svg` asset and confirm the current 4th bottom-tab icon wiring.
+- [x] Add the SVG rendering support needed by the mobile app and create a tab icon component that preserves the provided crane geometry.
+- [x] Update the 4th bottom tab to use the provided SVG icon with the visible label `Cranes`, then run focused mobile verification and document the result.
+
+## Bottom Tab SVG Crane Review (2026-03-13)
+- Added `react-native-svg` to `apps/mobile/package.json` so the mobile app can render the provided local SVG asset directly.
+- Added `apps/mobile/components/CranesTabSvgIcon.tsx` using the exact path/shape data from `c:\yadong\반장\5.svg`, while letting the stroke/fill tint follow the tab's active/inactive color.
+- Updated `apps/mobile/app/(tabs)/_layout.tsx` so the 4th bottom tab now renders that SVG icon and shows the visible label `Cranes`.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Bottom Tab SVG Crane Weight Follow-up Plan (2026-03-13)
+- [x] Re-check why the provided SVG icon still reads weaker than the other bottom-tab icons after direct wiring.
+- [x] Increase the same SVG's stroke and small filled details so the crane reads closer in weight to the other tab icons without changing the overall design.
+- [x] Re-run focused mobile verification and record the result.
+
+## Bottom Tab SVG Crane Weight Follow-up Review (2026-03-13)
+- Updated `apps/mobile/components/CranesTabSvgIcon.tsx` so the same provided SVG now renders with heavier visual weight instead of the original thin line-art look.
+- Increased the main crane stroke from `6` to `14`, enlarged the hook circle, softened the container corner radius slightly, and widened the container's inner vertical bars so the icon reads closer to the filled bottom-tab icons around it.
+- Kept the geometry, tint-following behavior, route wiring, and visible `Cranes` label unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
