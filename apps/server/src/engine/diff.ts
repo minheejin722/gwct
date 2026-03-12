@@ -15,8 +15,10 @@ import { buildYtUnitSnapshotFromEquipment } from "../services/equipment/ytUnits.
 import type {
   EquipmentYtMonitorConfig,
   GcRemainingMonitorRule,
+  ProgressPercentMonitorRule,
   YtMonitorState,
 } from "../services/monitorConfig/store.js";
+import type { GcProgressSnapshotItem } from "../services/gc/progressSnapshot.js";
 
 function byKey<T>(items: T[], keyOf: (item: T) => string): Map<string, T> {
   const map = new Map<string, T>();
@@ -375,6 +377,11 @@ interface GcLowEventOptions {
   sourceUrl: string;
 }
 
+function formatPercentValue(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+}
+
 export function detectGcRemainingLowEvents(
   prev: CraneStatus[],
   curr: CraneStatus[],
@@ -443,6 +450,114 @@ export function detectGcRemainingLowEvents(
   }
 
   return events;
+}
+
+interface GcProgressEventOptions {
+  sourceUrl: string;
+}
+
+export function detectGcProgressReachedEvents(
+  prev: GcProgressSnapshotItem[],
+  curr: GcProgressSnapshotItem[],
+  monitorRules: Record<string, ProgressPercentMonitorRule>,
+  source: SourceId,
+  occurredAt: string,
+  options: GcProgressEventOptions,
+): AlertEventInput[] {
+  const events: AlertEventInput[] = [];
+  const prevMap = byKey(prev, (item) => item.craneId);
+
+  for (const item of curr) {
+    const rule = monitorRules[String(item.gc)];
+    if (!rule?.enabled) {
+      continue;
+    }
+
+    const previous = prevMap.get(item.craneId);
+    if (!previous) {
+      continue;
+    }
+
+    const previousPercent = previous.preciseProgressPercent;
+    const currentPercent = item.preciseProgressPercent;
+    if (previousPercent === null || currentPercent === null) {
+      continue;
+    }
+
+    const thresholdPercent = rule.thresholdPercent;
+    if (!(previousPercent < thresholdPercent && currentPercent >= thresholdPercent)) {
+      continue;
+    }
+
+    events.push(
+      createEvent({
+        category: "CRANE",
+        type: "gc_progress_reached",
+        source,
+        dedupeKey: `gc:progress:${item.gc}:${thresholdPercent}:${currentPercent.toFixed(3)}`,
+        title: `GC${item.gc} 진행률 도달`,
+        message: `GC${item.gc} 진행률 ${formatPercentValue(currentPercent)} >= 기준값 ${formatPercentValue(thresholdPercent)}`,
+        beforeValue: formatPercentValue(previousPercent),
+        afterValue: formatPercentValue(currentPercent),
+        payload: {
+          type: "gc_progress_reached",
+          gc: item.gc,
+          craneId: item.craneId,
+          thresholdPercent,
+          currentPercent,
+          previousPercent,
+          currentTotals: {
+            done: item.totalDone,
+            remaining: item.totalRemaining,
+          },
+          capturedAt: occurredAt,
+          sourceUrl: options.sourceUrl,
+        },
+        occurredAt,
+      }),
+    );
+  }
+
+  return events;
+}
+
+export function detectGcTotalProgressReachedEvents(
+  previousPercent: number | null,
+  currentPercent: number | null,
+  rule: ProgressPercentMonitorRule,
+  source: SourceId,
+  occurredAt: string,
+  options: GcProgressEventOptions,
+): AlertEventInput[] {
+  if (!rule.enabled || previousPercent === null || currentPercent === null) {
+    return [];
+  }
+
+  if (!(previousPercent < rule.thresholdPercent && currentPercent >= rule.thresholdPercent)) {
+    return [];
+  }
+
+  return [
+    createEvent({
+      category: "CRANE",
+      type: "gc_total_progress_reached",
+      source,
+      dedupeKey: `gc:total-progress:${rule.thresholdPercent}:${currentPercent.toFixed(3)}`,
+      title: "전체 진행률 도달",
+      message: `GC 전체 진행률 ${formatPercentValue(currentPercent)} >= 기준값 ${formatPercentValue(rule.thresholdPercent)}`,
+      beforeValue: formatPercentValue(previousPercent),
+      afterValue: formatPercentValue(currentPercent),
+      payload: {
+        type: "gc_total_progress_reached",
+        thresholdPercent: rule.thresholdPercent,
+        currentPercent,
+        previousPercent,
+        capturedAt: occurredAt,
+        sourceUrl: options.sourceUrl,
+      },
+      occurredAt,
+    }),
+  ];
 }
 
 export function diffEquipmentLogins(

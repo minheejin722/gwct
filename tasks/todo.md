@@ -4510,3 +4510,638 @@
 - Verification:
   - `npm.cmd --workspace @gwct/mobile run typecheck`
   - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Redesign Plan (2026-03-13)
+- [x] Re-check the current `apps/mobile/app/cranes.tsx` data shape and confirm which live values can support the reference design.
+- [x] Rebuild the Crane Status screen around a reference-style top overview, map/list toggle, terminal hero panel, summary board, and redesigned crane cards.
+- [x] Run focused mobile verification and record the result.
+
+## Crane Status Redesign Review (2026-03-13)
+- Rebuilt `apps/mobile/app/cranes.tsx` from a plain live-row list into a reference-style `Terminal Overview` screen with a custom top header, `Map View / List View` toggle, updated stamp row, and richer card rhythm.
+- Added a custom SVG berth illustration that mirrors the provided layout more closely by rendering yard stacks, a crane line, water, and a vessel silhouette using the actual crane work-state colors.
+- Changed the data presentation model so the mobile screen groups `/api/cranes/live` rows per GC, aggregates remaining/discharge/load totals for multi-vessel cranes, and derives progress/summary values from those grouped cards instead of showing duplicate raw rows.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Map Card Follow-up Plan (2026-03-13)
+- [x] Re-check whether the apparent discharge/load mismatch comes from the server parser or from the mobile card formatting logic.
+- [x] Shrink only the map-view GC cards so they keep the progress ring, updated stamp, and vessel count but show only remaining numeric values for `Remaining / Discharging / Loading`.
+- [x] Re-run focused mobile verification and record the result.
+
+## Crane Status Map Card Follow-up Review (2026-03-13)
+- Checked the live `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A` HTML again and re-ran the current parsers against it. The server-side parser still matches the page's `잔량` rows correctly; for example the live `GC185` parse resolves to `11 / 43 / 54`, and the aggregate `gwct_gc_remaining` snapshot matches that.
+- The visible mismatch came from the mobile map cards, which were rendering `Discharging` and `Loading` as `합계(done) / total` style values derived from `dischargeDone` and `loadDone` instead of showing the `잔량` values the operators expect from that screen.
+- Updated `apps/mobile/app/cranes.tsx` so map-view cards are much shorter and now keep only:
+  - GC pill + status dot
+  - progress ring
+  - `Remaining`, `Discharging`, `Loading` with remaining counts only
+  - footer `Updated` stamp + vessel count
+- Left the richer copy intact for list view only.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Remaining Alignment Follow-up Plan (2026-03-13)
+- [x] Re-check the live GWCT `본선현황작업` table structure and confirm whether GC totals should come from `잔량` or `잔량 소계`.
+- [x] Update the server parser/snapshot path and both map/list mobile cards so `Remaining / Discharging / Loading` all reflect remaining values only, while map cards drop the percent text and status dot.
+- [x] Run focused parser tests, server/mobile typechecks, live HTML verification, and mobile export verification.
+
+## Crane Status Remaining Alignment Follow-up Review (2026-03-13)
+- Re-checked the current live `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A` page and confirmed the real structure is:
+  - `잔량` row: per-GC `양하 잔량 / 적하 잔량`
+  - `잔량 소계` row: per-GC total remaining
+- Root causes:
+  - mobile list cards still showed `done / total` style values, so the user saw the wrong numbers in list view even after the earlier map-only cleanup
+  - server parsing/persisting still derived `totalRemaining` by summing `양하 잔량 + 적하 잔량` instead of explicitly preferring the page's `잔량 소계` row
+- Updated:
+  - `apps/server/src/parsers/gwct.ts` to parse and prefer `잔량 소계` for `totalRemaining`
+  - `apps/server/src/services/monitorService.ts` to persist parser-provided `totalRemaining` as `remainingSubtotal`
+  - `apps/mobile/app/cranes.tsx` so both map/list cards show remaining counts only, and map cards remove the status dot and percent text while keeping the progress ring
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-parser.test.ts tests/gwct-work-status-parser.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - live HTML verification against the current GWCT page: `LIVE_OK checked=10`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Empty-State Cleanup Plan (2026-03-13)
+- [x] Remove the remaining circular gauge from map-view GC cards.
+- [x] Change missing `Remaining / Discharging / Loading` values from `-` to an empty display.
+- [x] Re-run focused mobile verification and record the result.
+
+## Crane Status Empty-State Cleanup Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so map-view GC cards no longer render the circular progress gauge at all.
+- Changed the shared mobile metric formatter for this screen so missing GC values now render as an empty string instead of `-`, which removes the placeholder dash in both map and list cards.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Percentage Verification Plan (2026-03-13)
+- [x] Re-check the current summary/card percent formulas against the live GWCT `본선현황작업` table values.
+- [x] Fix any formula path that does not exactly reflect `합계` versus remaining values from the live page.
+- [x] Re-run focused verification and record the result.
+
+## Crane Status Percentage Verification Review (2026-03-13)
+- Verified the current summary formulas in `apps/mobile/app/cranes.tsx` against the live GWCT page by re-parsing the current `본선현황작업` HTML and reproducing the screen's percentage math.
+- Found one issue during verification: when a GC had a known `잔량 소계` and one side of `양하 잔량 / 적하 잔량` was blank, the mobile summary was treating that blank as unknown instead of inferring `0`, which made `양하 퍼센트` fall back incorrectly.
+- Updated `apps/mobile/app/cranes.tsx` so summary percentage math now normalizes a missing side to `0` when the other side and `잔량 소계` make that exact split determinable.
+- Live verification after the fix produced:
+  - overall percent: `74%`
+  - discharge percent: `100%`
+  - load percent: `65%`
+  - active GC card progress: `GC185 72%`, `GC186 74%`, `GC187 75%`
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - live GWCT formula replay via `npx tsx` against `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## Crane Status Progress Semantics Fix Plan (2026-03-13)
+- [x] Re-check whether the `75%` app progress came from using the wrong GWCT table row for completed work.
+- [x] Update the GWCT work-status parser so `dischargeDone/loadDone` come from the page's `완료` row instead of the `합계` row, then keep the existing remaining/subtotal path intact.
+- [x] Re-run focused parser tests, typechecks, and live formula verification.
+
+## Crane Status Progress Semantics Fix Review (2026-03-13)
+- Root cause of the large progress error was confirmed in `apps/server/src/parsers/gwct.ts`: the parser was filling `dischargeDone` / `loadDone` from the page's `합계` row, so the app was effectively computing progress as `합계 / (합계 + 잔량)` instead of `완료 / (완료 + 잔량)` or `완료 / 합계`.
+- Updated the parser so `dischargeDone` / `loadDone` now come from the `완료` row while `dischargeRemaining` / `loadRemaining` still come from `잔량` and `totalRemaining` still prefers `잔량 소계`.
+- This means:
+  - remaining-count detection still follows the same live source path as before the redesign (`/api/cranes/live` backed by `gwct_gc_remaining`, `gwct_work_status`, `gwct_equipment_status`)
+  - only the progress/completion semantics changed, because the previous implementation was reading the wrong row for `done`
+- Current live verification after the parser fix produced:
+  - `합계`: 양하 `96`, 적하 `196`
+  - `완료`: 양하 `96`, 적하 `105`
+  - `잔량 소계`: `91`
+  - derived overall progress: `201 / (201 + 91) = 69%`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gwct-work-status-parser.test.ts tests/gc-parser.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - live GWCT formula replay via `npx tsx` against `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A`
+
+## Crane Status Progress Follow-up Plan (2026-03-13)
+- [x] Re-verify that summary `Discharged` and `Loaded` percentages still use `완료 / (완료 + 잔량)` against the current live GWCT table.
+- [x] Remove the extra status dot above the ring gauge in list-view GC cards.
+- [x] Run focused mobile verification and record the result.
+
+## Crane Status Progress Follow-up Review (2026-03-13)
+- Replayed the current live `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A` work-status table through the same parser and mobile summary math.
+- Confirmed the summary percentages are already correct and do not need code changes:
+  - `overallPercent = (dischargeDone + loadDone) / ((dischargeDone + loadDone) + totalRemaining)`
+  - `dischargePercent = dischargeDone / (dischargeDone + dischargeRemaining)`
+  - `loadPercent = loadDone / (loadDone + loadRemaining)`
+- Current live verification at check time produced:
+  - `완료`: 양하 `96`, 적하 `123`
+  - `잔량`: 양하 `0`, 적하 `73`
+  - `잔량 소계`: `73`
+  - derived percentages: overall `75%`, discharge `100%`, load `63%`
+- Updated `apps/mobile/app/cranes.tsx` to remove the list-view status dot above the ring gauge while leaving the ring itself and the compact map cards unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - live GWCT formula replay via `npx tsx` against `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A`
+
+## Crane Status Percent Rounding Plan (2026-03-13)
+- [x] Audit the mobile crane percentage display helper for any rounding-up behavior.
+- [x] Change percentage display so crane progress never rounds up before real completion.
+- [x] Re-run focused verification for edge-case percentages and mobile typecheck.
+
+## Crane Status Percent Rounding Review (2026-03-13)
+- Confirmed the crane screen percentage display was still using `Math.round`, which could show `11%` for `10.999...` and `100%` for `99.5%` style values.
+- Updated `apps/mobile/app/cranes.tsx` so the shared crane percentage clamp now uses `Math.floor` instead.
+- This means:
+  - `10.999...%` displays as `10%`
+  - `99.999...%` displays as `99%`
+  - exact `100%` still displays as `100%`
+- Verification:
+  - edge-case formula replay via `node` for `10.999999999999`, `99.999999999999`, and exact `100`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Three-State UI Plan (2026-03-13)
+- [x] Audit every mobile presentation path that still exposes `Attention`, `Checking`, or `Unknown`.
+- [x] Collapse visible crane-state presentation to `Working / Scheduled / Idle` while keeping the underlying server work-state logic intact.
+- [x] Re-run focused mobile verification and record the new grouping behavior.
+
+## Crane Status Three-State UI Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so the crane screen now presents only three visible statuses:
+  - `Working`
+  - `Scheduled`
+  - `Idle`
+- Internal server/live row states remain unchanged (`active`, `scheduled`, `checking`, `unknown`, `idle`), but the mobile presentation now folds:
+  - `checking -> Scheduled`
+  - `unknown -> Scheduled`
+- Applied that folding consistently to:
+  - summary chip counts
+  - card badge colors and labels
+  - card status hint copy
+  - map illustration palette colors
+- Removed the separate `Attention` summary chip entirely.
+- Verification:
+  - searched `apps/mobile/app/cranes.tsx` to confirm no remaining `Attention` / `Checking` presentation strings
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Idle Mapping Follow-up Plan (2026-03-13)
+- [x] Verify why empty non-working cranes were still surfacing as `Scheduled` after the three-state UI change.
+- [x] Update the mobile display-state mapping so empty `unknown` cranes with no crew and no live work evidence render as `Idle`.
+- [x] Re-run focused verification against the current live GC rows and mobile typecheck.
+
+## Crane Status Idle Mapping Follow-up Review (2026-03-13)
+- Root cause: current live rows for `GC181-184` and `GC188-190` were still internal `unknown` because the GWCT sources had no remaining/work row data for them, but the mobile three-state helper was folding every non-`active` and non-`idle` state into `Scheduled`.
+- Updated `apps/mobile/app/cranes.tsx` so display-state mapping now treats an internal `unknown` row as `Idle` when all of the following are true:
+  - no crew is assigned
+  - no vessel is attached
+  - no done values exist
+  - no remaining values exist
+- This keeps real queued work as `Scheduled` while letting truly empty cranes render as `Idle`.
+- Live verification after the fix showed:
+  - `GC185-187`: `Scheduled`
+  - `GC181-184`, `GC188-190`: `Idle`
+  - displayed summary counts: `Working 0 / Scheduled 3 / Idle 7`
+- Verification:
+  - live GWCT replay via `npx tsx` using the current parser + live-row builder + mobile display-state rules
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Map Berth Order Plan (2026-03-13)
+- [x] Re-check the current map-view berth order used for GC181~190.
+- [x] Update the map illustration so the visual order is `GC190` on the far left through `GC181` on the far right.
+- [x] Re-run focused verification to confirm active cranes color the corrected physical slots.
+
+## Crane Status Map Berth Order Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so the map illustration now uses a dedicated reversed berth order for rendering only:
+  - leftmost berth position: `GC190`
+  - rightmost berth position: `GC181`
+- Live row matching still keys by actual `gcNo`, so active/scheduled colors now land on the correct physical crane slots instead of the mirrored positions.
+- With the current live state where `GC185-187` have remaining work, the active map coloring now falls on the reversed berth positions that correspond to those crane numbers.
+- Verification:
+  - inspected the map render path and confirmed the berth array now uses reversed GC order
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status View Memory Plan (2026-03-13)
+- [x] Inspect how the `Map View / List View` toggle is currently stored on the cranes screen.
+- [x] Preserve the user's last selected cranes view across screen re-entry instead of resetting to `Map View` on every mount.
+- [x] Run focused mobile verification and record the behavior change.
+
+## Crane Status View Memory Review (2026-03-13)
+- Root cause: `apps/mobile/app/cranes.tsx` initialized `viewMode` with a hard-coded `useState("map")`, so every remount of the screen reset the segmented control back to `Map View`.
+- Updated the cranes screen to keep the last selected view mode in module scope and use that as the next screen-mount default.
+- Result:
+  - switch to `List View`, leave the screen, and return: it stays on `List View`
+  - switch back to `Map View`, leave the screen, and return: it stays on `Map View`
+- Verification:
+  - inspected the cranes screen state path to confirm the mount default now comes from the remembered selection instead of a hard-coded `"map"`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Done-Carry Progress Fix Plan (2026-03-13)
+- [x] Reproduce the current progress mismatch by comparing raw GWCT work-status rows against the server live-row builder and mobile percentage math.
+- [x] Fix the live-row builder so completed GC done values are preserved even after the same GC's remaining reaches zero.
+- [x] Add regression coverage and re-run focused server/mobile verification plus live replay.
+
+## Crane Status Done-Carry Progress Fix Review (2026-03-13)
+- Root cause: `apps/server/src/services/gc/workState.ts` was building live rows only from positive-remaining work-status rows, so once a GC's remaining reached `0` its `완료` values were dropped from the live API even though those completed moves still belong in total progress.
+- Updated the live-row builder to:
+  - keep informative work rows that still carry `dischargeDone/loadDone` even when remaining is no longer positive
+  - infer `totalRemaining = 0` for done-only rows with no remaining snapshot
+  - roll completed done totals into the single GC live row when only one active row remains for that GC
+- Added regression coverage in `apps/server/tests/gc-work-state.test.ts` for:
+  - a fully completed GC that must retain its done totals at `remaining = 0`
+  - a GC that still has one remaining row but also needs done totals from a completed row on the same crane
+- Live replay after the fix produced:
+  - `dischargeDone = 96`
+  - `loadDone = 194`
+  - `totalRemaining = 2`
+  - derived overall progress: `290 / (290 + 2) = 99%`
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-work-state.test.ts tests/gc-assignment-store.test.ts tests/gwct-work-status-parser.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - live GWCT replay via `npx tsx` against `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A`
+
+## Crane Status Recent-Complete Map Highlight Plan (2026-03-13)
+- [x] Add a map-view-only highlight for cranes that have just transitioned from work-in-progress to idle.
+- [x] Keep that highlight red for about 5 minutes, then let the crane fall back to the normal idle color.
+- [x] Re-run focused mobile verification and a transition-window simulation.
+
+## Crane Status Recent-Complete Map Highlight Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so the map view now remembers recent crane completions in runtime memory.
+- Behavior:
+  - when a crane transitions from a non-idle display state to `Idle`, its map crane silhouette turns red
+  - that red highlight lasts for `5 minutes`
+  - after the window expires, the crane falls back to the normal idle palette
+  - if the same crane starts working again before the window ends, the red highlight is cleared immediately
+- Scope:
+  - applied only to the map-view crane silhouette colors
+  - list cards, summary chips, and yard/ship colors keep their existing logic
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - transition-window simulation via `node` confirmed:
+    - completion mark exists at transition time
+    - still present at `+4 minutes`
+    - removed at `+6 minutes`
+
+## Crane Status Recent-Complete Card Ordering Plan (2026-03-13)
+- [x] Reuse the recent-completion window so newly completed crane cards stay at the top temporarily.
+- [x] Keep those cards pinned only during the same 5-minute window, then return them to the normal GC ordering.
+- [x] Update discharge/load summary meter colors and run focused mobile verification.
+
+## Crane Status Recent-Complete Card Ordering Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so crane cards now use a display-only sort that promotes recently completed cranes to the top while they are inside the existing 5-minute completion window.
+- After the 5-minute window expires, those cranes fall back to the normal card order again, which keeps the idle group in GC order.
+- Changed the summary progress meter colors to:
+  - `Discharged`: yellow
+  - `Loaded`: orange
+- Left the overall/completion ring colors unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `node` sort replay confirmed recent-complete cards sort ahead of the base order and drop back once the recent set is empty
+
+## Crane Status Initial Idle-Complete Promotion Follow-up Review (2026-03-13)
+- Root cause of the remaining issue: the recent-completion list was only populated when the screen observed a live `non-idle -> idle` transition, so cranes that were already idle-complete when the user first opened the screen still stayed in the normal bottom idle block.
+- Updated `apps/mobile/app/cranes.tsx` so an idle card is also promoted into the 5-minute recent-completion bucket on first observation when all of the following are true:
+  - display state is `Idle`
+  - `totalRemaining === 0`
+  - `totalDone > 0`
+- This lets already-finished cranes like `GC185` / `GC187` surface immediately at the top on first entry, while still expiring back to the normal order after the shared 5-minute window.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `node` first-observation simulation confirmed `GC185` and `GC187` are inserted into the recent set immediately while `GC186` stays out
+
+## Crane Status Shared Recent-Timing Check Review (2026-03-13)
+- Re-checked the current mobile implementation to confirm the map crane highlight and card-top promotion are driven by the exact same recent-completion source of truth.
+- Verified:
+  - the 5-minute recent window is defined once in `apps/mobile/app/cranes.tsx`
+  - the shared `recentCompletionCraneIds` set is built once from that window
+  - card ordering uses that shared set through `sortCraneCardsForDisplay(...)`
+  - the map crane palette also uses that same shared set inside `TerminalMapIllustration`
+- Result: start timing and expiry timing are already identical for the map red crane highlight and the card top-promotion behavior because both read from the same `recentCompletionCraneIds` set.
+- No additional code change was required for this check.
+
+## Crane Status Four-Tier Card Sort Plan (2026-03-13)
+- [x] Replace the current recent-complete-first card sort with the explicit priority order requested by operations.
+- [x] Keep GC number ordering within each priority bucket.
+- [x] Run focused mobile verification and a sort replay that proves the four-tier order.
+
+## Crane Status Four-Tier Card Sort Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so crane cards now sort with one explicit display rank:
+  - `1. Working`
+  - `2. Scheduled`
+  - `3. Recent-complete Idle`
+  - `4. General Idle`
+- Within each bucket, cards now fall back to `GC181 -> GC190` order.
+- This means recent-complete idle cards no longer outrank active or scheduled cranes.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `node` sort replay confirmed:
+    - active cards stay first
+    - scheduled cards stay second
+    - recent-complete idle cards come after scheduled
+    - remaining idle cards stay last in GC order
+
+## Crane Status Same-GC Split Card Order Plan (2026-03-13)
+- [x] Stop collapsing same-GC multi-vessel live rows into one rendered card when the user wants the scheduled vessel shown in its own lower-priority slot.
+- [x] Keep summary chips and berth-map coloring crane-grouped so one GC still drives one map crane and one summary state.
+- [x] Verify the new display ordering with a focused sort replay and mobile typecheck, then document the outcome.
+
+## Crane Status Same-GC Split Card Order Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` to separate crane-level aggregation from rendered list cards:
+  - summary chips, hero vessel text, recent-completion timing, and berth-map coloring still use one grouped card per GC
+  - rendered map/list cards now use one card per live row so the same GC can appear in different status buckets
+- Result:
+  - if `GC184` has one `Working` vessel row and one `Scheduled` vessel row, those now render as two cards
+  - the `Working` card stays in the working block
+  - the `Scheduled` card falls into the scheduled block instead of staying glued to the working card just because the GC number matches
+- Added stable per-row `cardKey` values so duplicate same-GC cards render without React key collisions.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - focused `node` sort replay confirmed ordering like:
+    - `GC183 active`
+    - `GC184 active`
+    - `GC184 scheduled`
+    - `GC190 idle`
+
+## Crane Status Zero-Work Progress Bug Plan (2026-03-13)
+- [x] Compare current GWCT `본선작업현황` live values against the `/api/cranes/live` payload and mobile summary math to isolate why queued-only work is rendering as `20%`.
+- [x] Fix the incorrect carry-over or fallback path so progress stays `0%` until the live `완료` rows actually increase.
+- [x] Run focused verification against the current live snapshot shape plus type/tests, then record the review.
+
+## Crane Status Zero-Work Progress Bug Review (2026-03-13)
+- Root cause was cross-source skew, not the live GWCT parser itself.
+  - Replaying the current live `http://www.gwct.co.kr:8080/dashboard/?m=F&s=A` HTML through `parseGwctWorkStatus(...)` produced only queued rows with `dischargeDone/loadDone = null`.
+  - The bad `20%` came from `/api/cranes/live` combining a newer `gwct_gc_remaining` snapshot with an older `gwct_work_status` snapshot whose completed `POS QINGDAO` rows were still in the DB.
+- Updated `apps/server/src/services/gc/workState.ts` so `buildGcCraneLiveRows(...)` now drops `gwct_work_status` rows entirely when their capture time is too far away from the GC remaining snapshot, instead of mixing incompatible generations and inflating `done`.
+- Added a regression test in `apps/server/tests/gc-work-state.test.ts` that proves a much newer GC snapshot plus an older done-only work-status row now yields `done = null` and `0%` progress.
+- Verification:
+  - replayed the current live GWCT HTML through the parser and confirmed current rows are queued-only with no completed counts
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/gc-work-state.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - local reproduction using current latest snapshots now reports `totalDone: 0`, `overallPercent: 0`
+
+## Crane Status Recent-Complete Black Marker Plan (2026-03-13)
+- [x] Change the shared recent-completion window from 5 minutes to 1 minute so the map crane highlight and card promotion expire together after 60 seconds.
+- [x] Replace the recent-complete berth-map crane color with black while keeping the same shared recent state logic.
+- [x] Verify that a crane leaving idle again immediately clears the recent-complete state instead of waiting for the timer, then document the review.
+
+## Crane Status Recent-Complete Black Marker Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so the shared recent-completion window is now `60 seconds` instead of `5 minutes`.
+- The berth-map recent-complete crane palette is now black/charcoal instead of red, while card ordering still uses the same shared recent-completion set.
+- Tightened the local prune interval to `1 second` so the 1-minute expiry is not delayed by the old 15-second timer.
+- The immediate-clear behavior for resumed work remains intact because the shared recent set is still deleted as soon as a grouped crane display state becomes non-idle.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - focused `node` timing replay confirmed:
+    - recent-complete entry remains present at `+59 seconds`
+    - disappears at `+61 seconds`
+    - disappears immediately when the same crane returns to `scheduled`
+
+## Crane Status Card Berth Label Plan (2026-03-13)
+- [x] Pull berth data from the live schedule list into the cranes screen without disturbing the existing crane live API flow.
+- [x] Replace the small bottom-right `vessels` count on crane cards with a `Berth` label derived from the scheduled vessel.
+- [x] Verify the mobile screen still typechecks and document the review.
+
+## Crane Status Card Berth Label Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so the screen now also reads `API_URLS.vessels` and builds a `vesselName -> berth` lookup from the live schedule list.
+- Crane card models now carry `berthLabel`, and the old bottom-right `n vessels` footer text has been replaced with `Berth {선석}` when a berth is available.
+- Manual refresh on the screen now refreshes both the crane feed and the vessel schedule feed together so the berth label stays aligned with the current vessel rows.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Berth Footer Copy Review (2026-03-13)
+- Adjusted the crane card footer copy in `apps/mobile/app/cranes.tsx` so the berth number now comes first and the suffix is lowercase, matching the old `n vessels` reading pattern.
+- The footer now renders as `{선석} berth` instead of `Berth {선석}`.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Map Vessel Tone Plan (2026-03-13)
+- [x] Add a vessel-based tone variant layer to the berth map so different vessels are distinguishable even when they share the same state color family.
+- [x] Keep the existing state families and recent-complete black override intact while applying only brightness/shade variation per vessel group.
+- [x] Run focused mobile verification and document the review.
+
+## Crane Status Map Vessel Tone Review (2026-03-13)
+- Updated `apps/mobile/app/cranes.tsx` so berth-map palettes now apply one of several brightness variants per distinct vessel while keeping the original state families:
+  - same vessel across multiple cranes keeps the same tone
+  - different vessels step through brighter/darker variants inside the same active/scheduled/idle family
+  - recent-complete cranes still override to the shared black palette first
+- The tone variation is map-only; list cards, summary chips, and the rest of the status colors are unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Directional Map Tone Review (2026-03-13)
+- Refined the berth-map tone logic so it now shades each contiguous vessel cluster from right to left instead of giving one fixed tone per vessel.
+- Within the same vessel cluster:
+  - the rightmost crane is the darkest
+  - each crane further left becomes progressively softer
+- Recent-complete black override still wins first, and the directional tone logic remains map-only.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Cluster Tone Correction Review (2026-03-13)
+- Corrected the berth-map tone model again after verifying the live grouping expectation.
+- The right rule is:
+  - one shared tone per contiguous vessel cluster
+  - rightmost vessel cluster = darkest
+  - next cluster to the left = softer
+  - next cluster to the left = softer again
+- This means a live shape like `GC182~185`, `GC186`, `GC187~188` should render as exactly three tones, not per-crane shading inside those groups.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Idle Yard Gray Review (2026-03-13)
+- Corrected the map yard-stack coloring so idle/no-work berth sections no longer inherit the vessel-toned crane palette.
+- Idle-side yard containers now render in neutral gray, while working/scheduled/recent-complete sections keep their existing colored map palettes.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Scheduled Yard Gray Review (2026-03-13)
+- Narrowed the berth-map yard-stack coloring further after confirming that non-working scheduled berths were still reading as active blue.
+- Yard stacks now stay colored only for `Working` and recent-complete sections.
+- `Scheduled` and `Idle` berth sections both fall back to neutral gray in the yard area, while the crane silhouettes themselves still keep their own map status colors.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Yard Middle-Slot Gray Review (2026-03-13)
+- Corrected the yard-area interpretation again after the user clarified they only wanted the middle container slot grayed out, not the whole yard block.
+- The berth-map yard stacks now keep the existing colored/random top and bottom slots, while only the middle slot falls back to neutral gray for non-working sections.
+- Active and recent-complete sections still use their normal colored middle slot.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Crane Status Progress Alert Integration Plan (2026-03-13)
+- [x] Extend the existing monitor settings model and server alert pipeline to store percentage-based crane progress and total progress thresholds.
+- [x] Detect percentage threshold crossings from the live Crane Status data so alerts reuse the current server-side notification/event flow.
+- [x] Add in-screen long-press configuration on crane cards and the Total Progress panel for map/list usage, then verify end-to-end behavior and document the review.
+
+## Crane Status Progress Alert Integration Review (2026-03-13)
+- Extended the shared monitor settings model with per-GC `gcProgressMonitors` and one `gcTotalProgressMonitor`, then exposed both through the existing `/api/monitors/config` route instead of creating a second alert path.
+- Added grouped crane-progress and total-progress crossing detection on the server so the new alerts reuse the current alert event, SSE, deep-link, and push-notification flow into the `Cranes` screen.
+- Updated `apps/mobile/app/cranes.tsx` so both crane cards and the `Total Progress` panel accept a long-press, open an in-screen percentage picker, and save those thresholds back through the monitor config API.
+- Added visible `Alert {n}%` badges on configured crane cards and on the total-progress panel so operators can see active thresholds without leaving the screen.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/threshold.test.ts tests/monitor-config-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/integration-alert.test.ts tests/threshold.test.ts tests/monitor-config-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npm.cmd --workspace @gwct/shared run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Progress Gauge Picker Refinement Plan (2026-03-13)
+- [x] Replace the current percentage alert preset buttons with a horizontal scrub gauge that updates the threshold live while the user drags.
+- [x] Support finer 0.1% threshold precision inside the final 1% range and align the server alert crossing logic with that precision.
+- [x] Re-run the focused server/mobile verification set and document the refinement review.
+
+## Crane Status Progress Gauge Picker Refinement Review (2026-03-13)
+- Replaced the percent alert picker buttons/chips in `apps/mobile/app/cranes.tsx` with a horizontal scrub gauge that updates the visible threshold live while the user drags left and right.
+- The gauge now uses integer steps through `1%~99%` and switches to `99.1%~99.9%` inside the final 1% band before `100%`, matching the finer control the user requested.
+- Extended the shared/server progress threshold path so progress monitor rules can store decimal thresholds and the alert crossing logic now compares against precise progress percentages rather than the floored display percent.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/threshold.test.ts tests/monitor-config-api.test.ts tests/integration-alert.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npm.cmd --workspace @gwct/shared run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Gauge Surface Simplification Plan (2026-03-13)
+- [x] Remove the lower tick/ruler portion of the progress alert picker and make the top gauge card itself the only horizontal scrub surface.
+- [x] Keep decimal precision only in the final 1% zone before completion while preserving the existing server-side decimal threshold support.
+- [x] Reduce configured-state indication to a single small alarm badge on the top-right of configured crane cards and verify the mobile build again.
+
+## Crane Status Gauge Surface Simplification Review (2026-03-13)
+- Simplified the progress alert modal again so the single top gauge card is now the only interactive scrub surface; the lower ruler/tick strip has been removed entirely.
+- Horizontal dragging on that gauge card updates the alert threshold live, and the value still only exposes decimal precision in the final 1% zone before `100%`.
+- Replaced the previous text badge treatment on crane cards with one compact alarm icon badge at the top-right of each configured crane card; the Total Progress panel keeps long-press setup but no longer shows the text badge.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Scrub Fix Review (2026-03-13)
+- Fixed the non-working progress scrub interaction in `apps/mobile/app/cranes.tsx` by removing the initialization effect that was pushing the value back to the starting threshold after every drag update.
+- Tightened the scrub gauge card vertically by reducing its padding, gap, and copy sizing so it reads less like a thick block while preserving the same drag surface and final-1% decimal behavior.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Gauge Default & Full-Fill Plan (2026-03-13)
+- [x] Change the default progress alert threshold to `100%` for unconfigured crane and total-progress monitors.
+- [x] Ensure the scrub gauge visually fills completely at `100%` instead of stopping short.
+- [x] Preserve decimal precision only in the final `1%` before completion, then re-run focused verification and document the review.
+
+## Crane Status Gauge Default & Full-Fill Review (2026-03-13)
+- Changed the unconfigured progress alert default from `80%` to `100%` in both the mobile fallback rule and the server monitor-settings default so newly opened crane/total-progress alarms start from full completion.
+- Updated the scrub gauge fill rendering so the `100%` state uses a dedicated full-fill style instead of relying on the generic percentage width calculation, which was visually stopping short.
+- Kept the existing decimal rule scoped to the final `1%` before completion (`99.1%~99.9%`) while leaving `1%~99%` on whole-number steps.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Scrub Precision Correction Plan (2026-03-13)
+- [x] Move progress-alarm decimal precision from the old `99.x%` band to the actual low-end `1% 이하` band.
+- [x] Refactor the gauge drag interaction so it nudges the current value in fine relative steps instead of jumping to the finger position.
+- [x] Re-run focused server/mobile verification and record the review once the new threshold behavior passes.
+
+## Crane Status Scrub Precision Correction Review (2026-03-13)
+- Corrected the progress-alarm threshold rule so decimal precision now lives only in the low-end `0.1%~1.0%` band; values above `1%` snap to whole numbers on both the mobile picker and the server monitor-config path.
+- Rebuilt the mobile gauge drag interaction as a relative scrub from the current displayed value instead of an absolute finger-position mapper, and slowed it to one threshold step per fixed drag distance so small adjustments stop overshooting.
+- Kept the `100%` full-fill state and compact single-card picker layout intact while updating the helper copy to match the new low-end decimal rule.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/threshold.test.ts tests/monitor-config-api.test.ts`
+  - `npm.cmd --workspace @gwct/shared run typecheck`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Scrub Acceleration Plan (2026-03-13)
+- [x] Add consecutive-drag acceleration to the relative progress scrub so repeated quick swipes move the threshold faster.
+- [x] Keep the first drag precise and preserve the same low-end `0.1%` stepping at `1%` and below.
+- [x] Re-run mobile verification and record the review after the interaction compiles cleanly.
+
+## Crane Status Scrub Acceleration Review (2026-03-13)
+- Kept the gauge on the same relative-scrub model, but added a consecutive-drag streak window so the first drag stays precise while quick follow-up swipes speed up the same value-change logic.
+- The picker now increases its internal acceleration multiplier when another drag starts within `900ms` of the previous release, with a capped speed-up so it feels faster without becoming uncontrollable.
+- Preserved the existing `1% 이하` decimal stepping and updated the hint copy so the behavior matches the new accelerated interaction.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Total Progress Badge Plan (2026-03-13)
+- [x] Reuse the existing compact alarm badge on the `Total Progress` summary panel when its monitor is enabled.
+- [x] Run mobile verification and record the review once the summary badge compiles cleanly.
+
+## Crane Status Total Progress Badge Review (2026-03-13)
+- Added the same compact alarm badge to the `Total Progress` summary panel so its long-press-configured alert now has visible armed-state feedback just like the individual crane cards.
+- Reused the existing `CraneAlarmBadge` component instead of introducing a second badge style, and aligned the summary title row so the badge sits cleanly on the right edge of the panel.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Stop-Reason Map Link Plan (2026-03-13)
+- [x] Reuse the GC Cabin/Under `stopReason` signal on the Cranes screen by reading the equipment latest feed alongside the existing crane/vessel feeds.
+- [x] Override only the berth-map crane silhouette palette to red when the matching GC currently has a stop reason, without recoloring the rest of the map illustration.
+- [x] Re-run mobile verification and record the review once the map-link change compiles cleanly.
+
+## Crane Status Stop-Reason Map Link Review (2026-03-13)
+- Wired the Cranes screen to the existing equipment latest feed so map rendering now knows which GC numbers currently carry a `stopReason`, instead of inventing a second stop-state detector.
+- Added a dedicated stop-reason red palette only for the berth-map crane silhouette; yard stacks, ship blocks, and the rest of the illustration still follow the existing normal/recent-complete color rules.
+- Verified against the live equipment feed that the current stop-reason GCs are `187` (`붐 UP/DOWN`) and `188` (`본선접안대기(검역,라싱해체 등)`), which are now the cranes that should render red on the map.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Boom-Up Map Variant Plan (2026-03-13)
+- [x] Detect the specific `붐 UP/DOWN` stop reason from the same equipment stop-reason lookup already feeding the map red override.
+- [x] Swap the normal berth-map boom geometry for a raised-boom silhouette only on those cranes, while leaving other stop reasons on the regular red crane shape.
+- [x] Re-run mobile verification and record the review once the shape variant compiles cleanly.
+
+## Crane Status Boom-Up Map Variant Review (2026-03-13)
+- Added an exact `붐 UP/DOWN` stop-reason check on top of the existing stop-reason map lookup so only that reason changes the berth-map crane geometry.
+- Those cranes now keep the same red stop palette but switch from the normal boom profile to a raised-boom silhouette with a taller mast and lifted upper boom path; other stop reasons still use the standard red crane shape.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Boom Direction Correction Plan (2026-03-13)
+- [x] Flip the `붐 UP/DOWN` raised-boom geometry so the lifted boom sits on the waterside/ship side instead of reading as a landside lift.
+- [x] Re-run mobile verification and record the review once the corrected silhouette compiles cleanly.
+
+## Crane Status Boom Direction Correction Review (2026-03-13)
+- Corrected the `붐 UP/DOWN` raised-boom branch so the lifted boom now rises on the waterside/ship side of the berth-map crane instead of reading as a landside mast lift.
+- Kept the same stop-reason red palette and only flipped the boom geometry and support lines for that exact branch.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Boom Variant Rollback Plan (2026-03-13)
+- [x] Remove the special `붐 UP/DOWN` raised-boom silhouette branch and return all stop-reason cranes to the same standard map crane shape.
+- [x] Re-run mobile verification and record the rollback review once the silhouette reset compiles cleanly.
+
+## Crane Status Boom Variant Rollback Review (2026-03-13)
+- Removed the special `붐 UP/DOWN` raised-boom silhouette branch so every stop-reason crane now uses the same standard map crane shape again.
+- Kept the existing stop-reason red color override and equipment-feed linkage intact; only the extra geometry branch was rolled back.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Stop-Reason Card Color Plan (2026-03-13)
+- [x] Reuse the existing equipment stop-reason lookup to flag lower crane cards whose GC currently has a stop reason.
+- [x] Override those cards' accent tone to red so they no longer stay on the normal green/blue status palette.
+- [x] Re-run mobile verification and record the review once the card-color change compiles cleanly.
+
+## Crane Status Stop-Reason Card Color Review (2026-03-13)
+- Reused the same GC stop-reason lookup already feeding the berth map so lower crane cards now know when their GC is currently stopped.
+- Those cards now swap their accent tone to a red stop palette, which changes the crane ID pill, ring/progress accent, and berth footer accent without changing the rest of the card content.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## Crane Status Threshold Decimal Revert Plan (2026-03-13)
+- [x] Restore the progress-alert decimal threshold rule from the low-end `1% 이하` band back to the final `99%~100%` band in the shared helper and mobile scrub step table.
+- [x] Re-align the server monitor-config validation and focused tests to the restored `99.x%` threshold behavior.
+- [x] Re-run focused server/mobile verification and record the review once the reverted threshold rule passes cleanly.
+
+## Crane Status Threshold Decimal Revert Review (2026-03-13)
+- Reverted the progress-alert decimal threshold rule back to the final `99.1%~99.9%` band in the shared threshold helper, so values below `99%` are whole-number steps again and the server monitor config follows the same rule.
+- Reworked the mobile scrub step-index mapping to match that restored layout: integer steps from `1%` through `99%`, decimal steps only through the final `99.x%` band, and `100%` as the full-completion endpoint.
+- Updated the picker helper copy and restored the focused server tests/config-route expectations to `99.5/99.7/99.8/99.9` thresholds.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/threshold.test.ts tests/monitor-config-api.test.ts`
+  - `npm.cmd --workspace @gwct/shared run typecheck`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`

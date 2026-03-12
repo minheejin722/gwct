@@ -84,6 +84,10 @@ function parseNumeric(raw: string | null | undefined): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function pickRow(candidates: string[][], predicate: (label: string) => boolean): string[] {
+  return candidates.find((cells) => predicate(cells[0] || "")) || [];
+}
+
 function parseOperatorCellHtml(html: string): { operator: string | null; helper: string | null } {
   const normalized = html
     .replace(/<br\s*\/?>/gi, "\n")
@@ -187,19 +191,19 @@ function extractGcRemainFromTable($: ReturnType<typeof load>, table: any) {
     )
     .filter((cells) => cells.length > 2);
 
-  const remainRow =
-    dataRows.find((cells) => /^잔량$/.test(cells[0])) ||
-    dataRows.find((cells) => cells[0].startsWith("잔량") && !cells[0].includes("소계"));
+  const remainRow = pickRow(dataRows, (label) => /^잔량$/.test(label) || (label.startsWith("잔량") && !label.includes("소계")));
+  const subtotalRow = pickRow(dataRows, (label) => label.replace(/\s+/g, "") === "잔량소계");
 
-  if (!remainRow) {
+  if (!remainRow.length) {
     return [];
   }
 
-  const extracted: Array<{ gc: number; discharge: number | null; load: number | null }> = [];
+  const extracted: Array<{ gc: number; discharge: number | null; load: number | null; subtotal: number | null }> = [];
   gcOrder.forEach((gc, idx) => {
     const discharge = parseNumeric(remainRow[1 + idx * 2]);
     const load = parseNumeric(remainRow[2 + idx * 2]);
-    extracted.push({ gc, discharge, load });
+    const subtotal = parseNumeric(subtotalRow[1 + idx]);
+    extracted.push({ gc, discharge, load, subtotal });
   });
 
   return extracted;
@@ -562,7 +566,7 @@ function extractCraneStatsFromTable(
     .map((_, th) => clean($(th).text()))
     .get();
 
-  const craneIndices: Array<{ craneId: string; dischargeIdx: number; loadIdx: number }> = [];
+  const craneIndices: Array<{ craneId: string; dischargeIdx: number; loadIdx: number; subtotalIdx: number }> = [];
   let gcOrder = 0;
   for (let i = 0; i < headerCells.length; i += 1) {
     const text = headerCells[i];
@@ -573,7 +577,8 @@ function extractCraneStatsFromTable(
     const craneId = `GC${match[1]}`;
     const dischargeIdx = 1 + gcOrder * 2;
     const loadIdx = dischargeIdx + 1;
-    craneIndices.push({ craneId, dischargeIdx, loadIdx });
+    const subtotalIdx = 1 + gcOrder;
+    craneIndices.push({ craneId, dischargeIdx, loadIdx, subtotalIdx });
     gcOrder += 1;
   }
 
@@ -590,17 +595,21 @@ function extractCraneStatsFromTable(
     rowMap.set(label, cells);
   });
 
-  const sumRow = rowMap.get("합계") || [];
+  const completedRow = rowMap.get("완료") || [];
   const remainRow = rowMap.get("잔량") || [];
+  const subtotalRow = rowMap.get("잔량 소계") || rowMap.get("잔량소계") || [];
 
   const craneStatuses: CraneStatus[] = [];
   for (const idx of craneIndices) {
-    const dischargeDone = parseNumeric(sumRow[idx.dischargeIdx]);
-    const loadDone = parseNumeric(sumRow[idx.loadIdx]);
+    const dischargeDone = parseNumeric(completedRow[idx.dischargeIdx]);
+    const loadDone = parseNumeric(completedRow[idx.loadIdx]);
     const dischargeRemaining = parseNumeric(remainRow[idx.dischargeIdx]);
     const loadRemaining = parseNumeric(remainRow[idx.loadIdx]);
+    const subtotalRemaining = parseNumeric(subtotalRow[idx.subtotalIdx]);
     const totalRemaining =
-      dischargeRemaining !== null || loadRemaining !== null
+      subtotalRemaining !== null
+        ? subtotalRemaining
+        : dischargeRemaining !== null || loadRemaining !== null
         ? (dischargeRemaining || 0) + (loadRemaining || 0)
         : null;
 
@@ -663,11 +672,11 @@ export function parseGwctGcRemaining(html: string, seenAt: string, source: Sourc
   const bundle = createEmptyBundle();
   const $ = load(html);
 
-  const aggregate = new Map<number, { discharge: number | null; load: number | null }>();
+  const aggregate = new Map<number, { discharge: number | null; load: number | null; subtotal: number | null }>();
   let candidateTableCount = 0;
   let matchedTableCount = 0;
   TARGET_GCS.forEach((gc) => {
-    aggregate.set(gc, { discharge: null, load: null });
+    aggregate.set(gc, { discharge: null, load: null, subtotal: null });
   });
 
   $(gwctSelectors.workStatus.table).each((_, table) => {
@@ -692,6 +701,9 @@ export function parseGwctGcRemaining(html: string, seenAt: string, source: Sourc
       if (item.load !== null) {
         prev.load = (prev.load ?? 0) + item.load;
       }
+      if (item.subtotal !== null) {
+        prev.subtotal = (prev.subtotal ?? 0) + item.subtotal;
+      }
     });
   });
 
@@ -714,7 +726,9 @@ export function parseGwctGcRemaining(html: string, seenAt: string, source: Sourc
       dischargeRemaining: values.discharge,
       loadRemaining: values.load,
       totalRemaining:
-        values.discharge !== null || values.load !== null
+        values.subtotal !== null
+          ? values.subtotal
+          : values.discharge !== null || values.load !== null
           ? (values.discharge || 0) + (values.load || 0)
           : null,
       progressPercent: null,

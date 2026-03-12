@@ -12,6 +12,7 @@ export interface GcCraneLiveRow extends CraneStatus {
 }
 
 const EMPTY_TEXT_MARKERS = new Set(["-", "N/A", "NA"]);
+const MAX_WORK_STATUS_SKEW_MS = 15 * 60 * 1000;
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
   const normalized = (value || "").replace(/\s+/g, " ").trim();
@@ -61,11 +62,40 @@ function buildGcAssignmentMap(snapshot: GcAssignmentState | null): Map<number, G
   return map;
 }
 
+function alignWorkStatusRowsToGcSnapshot(
+  gcSnapshot: GcRemainingSnapshot | null,
+  workStatusRows: CraneStatus[],
+): CraneStatus[] {
+  if (!gcSnapshot || workStatusRows.length === 0) {
+    return workStatusRows;
+  }
+
+  const gcCapturedAtMs = Date.parse(gcSnapshot.capturedAt);
+  if (!Number.isFinite(gcCapturedAtMs)) {
+    return workStatusRows;
+  }
+
+  const latestWorkSeenAtMs = workStatusRows
+    .map((row) => Date.parse(row.seenAt))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => right - left)[0];
+
+  if (!Number.isFinite(latestWorkSeenAtMs)) {
+    return workStatusRows;
+  }
+
+  return Math.abs(gcCapturedAtMs - latestWorkSeenAtMs) > MAX_WORK_STATUS_SKEW_MS ? [] : workStatusRows;
+}
+
 function hasPositiveRemaining(row: CraneStatus): boolean {
   if (typeof row.totalRemaining === "number") {
     return row.totalRemaining > 0;
   }
   return (row.dischargeRemaining ?? 0) > 0 || (row.loadRemaining ?? 0) > 0;
+}
+
+function hasRecordedDone(row: CraneStatus): boolean {
+  return typeof row.dischargeDone === "number" || typeof row.loadDone === "number";
 }
 
 function compareWorkRows(left: CraneStatus, right: CraneStatus): number {
@@ -76,6 +106,18 @@ function compareWorkRows(left: CraneStatus, right: CraneStatus): number {
 
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+}
+
+function sumDefinedNumbers(values: Array<number | null | undefined>): number | null {
+  let total = 0;
+  let hasNumber = false;
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      total += value;
+      hasNumber = true;
+    }
+  }
+  return hasNumber ? total : null;
 }
 
 function buildGcPositiveWorkRowsMap(rows: CraneStatus[]): Map<number, CraneStatus[]> {
@@ -93,6 +135,37 @@ function buildGcPositiveWorkRowsMap(rows: CraneStatus[]): Map<number, CraneStatu
     map.set(gc, [...bucket].sort(compareWorkRows));
   }
   return map;
+}
+
+function buildGcInformativeWorkRowsMap(rows: CraneStatus[]): Map<number, CraneStatus[]> {
+  const map = new Map<number, CraneStatus[]>();
+  for (const row of rows) {
+    const gc = parseGcNoFromCraneId(row.craneId);
+    if (gc === null || (!hasPositiveRemaining(row) && !hasRecordedDone(row))) {
+      continue;
+    }
+    const current = map.get(gc) || [];
+    current.push(row);
+    map.set(gc, current);
+  }
+  for (const [gc, bucket] of map) {
+    map.set(gc, [...bucket].sort(compareWorkRows));
+  }
+  return map;
+}
+
+function aggregateWorkDone(rows: CraneStatus[]): { dischargeDone: number | null; loadDone: number | null } {
+  return {
+    dischargeDone: sumDefinedNumbers(rows.map((row) => row.dischargeDone)),
+    loadDone: sumDefinedNumbers(rows.map((row) => row.loadDone)),
+  };
+}
+
+function withCarry(base: number | null | undefined, carry: number): number | null {
+  if (carry <= 0) {
+    return typeof base === "number" ? base : null;
+  }
+  return (typeof base === "number" ? base : 0) + carry;
 }
 
 function listPositiveWorkVesselNames(rows: CraneStatus[]): string[] {
@@ -196,10 +269,12 @@ export function buildGcCraneLiveRows(
   workStatusRows: CraneStatus[],
   assignmentState: GcAssignmentState | null = null,
 ): GcCraneLiveRow[] {
+  const alignedWorkStatusRows = alignWorkStatusRowsToGcSnapshot(gcSnapshot, workStatusRows);
   const remainingByGc = buildGcRemainingMap(gcSnapshot);
   const equipmentByGc = buildGcEquipmentMap(equipmentSnapshot);
   const assignmentByGc = buildGcAssignmentMap(assignmentState);
-  const workRowsByGc = buildGcPositiveWorkRowsMap(workStatusRows);
+  const positiveWorkRowsByGc = buildGcPositiveWorkRowsMap(alignedWorkStatusRows);
+  const informativeWorkRowsByGc = buildGcInformativeWorkRowsMap(alignedWorkStatusRows);
   const seenAtFallback = gcSnapshot?.capturedAt || equipmentSnapshot?.capturedAt || new Date().toISOString();
 
   const rows: GcCraneLiveRow[] = [];
@@ -208,20 +283,26 @@ export function buildGcCraneLiveRows(
     const craneId = `GC${gc}`;
     const remaining = remainingByGc.get(gc);
     const equipment = equipmentByGc.get(gc);
-    const workRows = workRowsByGc.get(gc) || [];
+    const workRows = positiveWorkRowsByGc.get(gc) || [];
+    const informativeWorkRows = informativeWorkRowsByGc.get(gc) || [];
     const assignment = assignmentByGc.get(gc);
     const crewAssigned = hasAssignedGcCrew(equipment);
+    const aggregatedDone = aggregateWorkDone(informativeWorkRows);
 
     if (workRows.length > 1) {
+      const positiveDone = aggregateWorkDone(workRows);
+      const dischargeCarry = Math.max((aggregatedDone.dischargeDone ?? 0) - (positiveDone.dischargeDone ?? 0), 0);
+      const loadCarry = Math.max((aggregatedDone.loadDone ?? 0) - (positiveDone.loadDone ?? 0), 0);
       workRows.forEach((workRow) => {
         const totalRemaining = workRow.totalRemaining ?? null;
         const workState = deriveGcLiveRowWorkState(totalRemaining, equipment, workRow, workRows, assignment);
+        const isFirstRow = workRow === workRows[0];
         const rowBase: Omit<GcCraneLiveRow, "signature"> = {
           source: workRow.source,
           craneId,
           vesselName: workRow.vesselName ?? null,
-          dischargeDone: workRow.dischargeDone ?? null,
-          loadDone: workRow.loadDone ?? null,
+          dischargeDone: isFirstRow ? withCarry(workRow.dischargeDone, dischargeCarry) : workRow.dischargeDone ?? null,
+          loadDone: isFirstRow ? withCarry(workRow.loadDone, loadCarry) : workRow.loadDone ?? null,
           dischargeRemaining: workRow.dischargeRemaining ?? null,
           loadRemaining: workRow.loadRemaining ?? null,
           totalRemaining,
@@ -246,16 +327,22 @@ export function buildGcCraneLiveRows(
       continue;
     }
 
-    const workRow = workRows[0];
-    const totalRemaining = remaining?.remainingSubtotal ?? workRow?.totalRemaining ?? null;
-    const workState = deriveGcLiveRowWorkState(totalRemaining, equipment, workRow, workRows, assignment);
+    const workRow = workRows[0] || informativeWorkRows[0];
+    const inferredZeroRemaining =
+      remaining?.remainingSubtotal == null &&
+      workRows.length === 0 &&
+      (aggregatedDone.dischargeDone !== null || aggregatedDone.loadDone !== null)
+        ? 0
+        : null;
+    const totalRemaining = remaining?.remainingSubtotal ?? workRow?.totalRemaining ?? inferredZeroRemaining;
+    const workState = deriveGcLiveRowWorkState(totalRemaining, equipment, workRows[0], workRows, assignment);
 
     const rowBase: Omit<GcCraneLiveRow, "signature"> = {
       source: gcSnapshot?.source || workRow?.source || "gwct_gc_remaining",
       craneId,
       vesselName: workRow?.vesselName ?? null,
-      dischargeDone: workRow?.dischargeDone ?? null,
-      loadDone: workRow?.loadDone ?? null,
+      dischargeDone: aggregatedDone.dischargeDone ?? null,
+      loadDone: aggregatedDone.loadDone ?? null,
       dischargeRemaining: remaining?.dischargeRemaining ?? workRow?.dischargeRemaining ?? null,
       loadRemaining: remaining?.loadRemaining ?? workRow?.loadRemaining ?? null,
       totalRemaining,

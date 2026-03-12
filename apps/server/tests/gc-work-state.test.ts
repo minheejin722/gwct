@@ -11,13 +11,14 @@ function craneRow(
   dischargeRemaining: number | null,
   loadRemaining: number | null,
   totalRemaining: number | null,
+  options?: { dischargeDone?: number | null; loadDone?: number | null },
 ): CraneStatus {
   return {
     source: "gwct_work_status",
     craneId,
     vesselName,
-    dischargeDone: null,
-    loadDone: null,
+    dischargeDone: options?.dischargeDone ?? null,
+    loadDone: options?.loadDone ?? null,
     dischargeRemaining,
     loadRemaining,
     totalRemaining,
@@ -240,5 +241,98 @@ describe("gc work state", () => {
     );
 
     expect(rows.every((row) => row.workState === "scheduled" || row.craneId !== "GC184")).toBe(true);
+  });
+
+  it("preserves completed done values for a crane even after its remaining reaches zero", () => {
+    const rows = buildGcCraneLiveRows(
+      gcSnapshot(
+        { gc: 185, dischargeRemaining: 0, loadRemaining: 0, remainingSubtotal: 0 },
+        { gc: 186, dischargeRemaining: 0, loadRemaining: 6, remainingSubtotal: 6 },
+      ),
+      equipmentSnapshot({
+        gcNo: 186,
+        equipmentId: "GC186",
+        driverName: null,
+        hkName: null,
+        loginTime: null,
+        stopReason: null,
+      }),
+      [
+        craneRow("GC185", "POS QINGDAO", null, null, null, { dischargeDone: 57, loadDone: 31 }),
+        craneRow("GC186", "POS QINGDAO", null, 6, 6, { dischargeDone: 24, loadDone: 84 }),
+      ],
+    );
+
+    expect(rows.find((row) => row.craneId === "GC185")).toMatchObject({
+      dischargeDone: 57,
+      loadDone: 31,
+      totalRemaining: 0,
+      workState: "idle",
+    });
+    expect(rows.find((row) => row.craneId === "GC186")).toMatchObject({
+      dischargeDone: 24,
+      loadDone: 84,
+      totalRemaining: 6,
+      workState: "scheduled",
+    });
+  });
+
+  it("keeps completed done totals when one remaining work row is still live on the same crane", () => {
+    const rows = buildGcCraneLiveRows(
+      gcSnapshot({ gc: 186, dischargeRemaining: 0, loadRemaining: 6, remainingSubtotal: 6 }),
+      equipmentSnapshot({
+        gcNo: 186,
+        equipmentId: "GC186",
+        driverName: null,
+        hkName: null,
+        loginTime: null,
+        stopReason: null,
+      }),
+      [
+        craneRow("GC186", "VESSEL-A", null, null, null, { dischargeDone: 24, loadDone: 31 }),
+        craneRow("GC186", "VESSEL-B", null, 6, 6, { dischargeDone: null, loadDone: 53 }),
+      ],
+    );
+
+    expect(rows.filter((row) => row.craneId === "GC186")).toHaveLength(1);
+    expect(rows.find((row) => row.craneId === "GC186")).toMatchObject({
+      dischargeDone: 24,
+      loadDone: 84,
+      totalRemaining: 6,
+      workState: "scheduled",
+    });
+  });
+
+  it("ignores stale work-status done rows when the GC remaining snapshot is much newer", () => {
+    const rows = buildGcCraneLiveRows(
+      {
+        source: "gwct_gc_remaining",
+        sourceUrl: "http://www.gwct.co.kr:8080/dashboard/?m=F&s=A",
+        capturedAt: "2026-03-06T04:30:00.000Z",
+        items: [{ gc: 185, dischargeRemaining: 73, loadRemaining: 169, remainingSubtotal: 242 }],
+      },
+      equipmentSnapshot({
+        gcNo: 185,
+        equipmentId: "GC185",
+        driverName: null,
+        hkName: null,
+        loginTime: null,
+        stopReason: null,
+      }),
+      [
+        {
+          ...craneRow("GC185", "POS QINGDAO", null, null, null, { dischargeDone: 57, loadDone: 31 }),
+          seenAt: "2026-03-06T04:00:00.000Z",
+        },
+      ],
+    );
+
+    expect(rows.find((row) => row.craneId === "GC185")).toMatchObject({
+      vesselName: null,
+      dischargeDone: null,
+      loadDone: null,
+      totalRemaining: 242,
+      workState: "scheduled",
+    });
   });
 });

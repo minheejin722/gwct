@@ -4,7 +4,9 @@ import { env } from "../config/env.js";
 import type { Repository, AlertEventInput } from "../db/repository.js";
 import {
   detectGcEquipmentFocusEvents,
+  detectGcProgressReachedEvents,
   detectGcRemainingLowEvents,
+  detectGcTotalProgressReachedEvents,
   detectGwctEtaChangedEvents,
   detectYtCountStateEvents,
   detectYtUnitStatusEvents,
@@ -18,7 +20,12 @@ import type { NotificationService } from "../notifications/service.js";
 import { shouldDispatchRealtimeNotification } from "../notifications/policy.js";
 import type { HtmlFetcher } from "../scraper/fetcher.js";
 import { SOURCE_DEFINITIONS, type SourceDefinition } from "../scraper/sources.js";
-import { saveGcLatestSnapshot, summarizeGcRange, type GcRemainingSnapshot } from "./gc/latestStore.js";
+import {
+  loadGcLatestSnapshot,
+  saveGcLatestSnapshot,
+  summarizeGcRange,
+  type GcRemainingSnapshot,
+} from "./gc/latestStore.js";
 import {
   saveScheduleFocusSnapshot,
   summarizeScheduleFocus,
@@ -46,6 +53,8 @@ import {
   loadGcAssignmentState,
   saveGcAssignmentState,
 } from "./gc/assignmentStore.js";
+import { buildGcCraneLiveRows } from "./gc/workState.js";
+import { buildGcProgressSnapshot } from "./gc/progressSnapshot.js";
 import type { GwctCadenceGovernor } from "./scrapeCadence/governor.js";
 
 export interface RunOptions {
@@ -247,9 +256,10 @@ export class MonitorService {
       const discharge = row?.dischargeRemaining ?? null;
       const load = row?.loadRemaining ?? null;
       const subtotal =
-        discharge !== null || load !== null
+        row?.totalRemaining ??
+        (discharge !== null || load !== null
           ? (discharge ?? 0) + (load ?? 0)
-          : null;
+          : null);
 
       items.push({
         gc,
@@ -310,6 +320,74 @@ export class MonitorService {
         "gc remaining partial subtotal missing",
       );
     }
+  }
+
+  private buildGcSnapshotFromRows(
+    rows: ReturnType<typeof parseBySource>["cranes"],
+    fallbackCapturedAt: string,
+    sourceUrl: string,
+  ): GcRemainingSnapshot {
+    const seenAtCandidates = rows
+      .map((row) => Date.parse(row.seenAt))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => right - left);
+    const capturedAt = seenAtCandidates[0] ? new Date(seenAtCandidates[0]).toISOString() : fallbackCapturedAt;
+
+    return {
+      source: "gwct_gc_remaining",
+      sourceUrl,
+      capturedAt,
+      items: Array.from({ length: 10 }, (_, index) => 181 + index).map((gc) => {
+        const row = rows.find((item) => item.craneId === `GC${gc}`);
+        const dischargeRemaining = typeof row?.dischargeRemaining === "number" ? row.dischargeRemaining : null;
+        const loadRemaining = typeof row?.loadRemaining === "number" ? row.loadRemaining : null;
+        const remainingSubtotal =
+          typeof row?.totalRemaining === "number"
+            ? row.totalRemaining
+            : dischargeRemaining !== null || loadRemaining !== null
+              ? (dischargeRemaining ?? 0) + (loadRemaining ?? 0)
+              : null;
+        return {
+          gc,
+          dischargeRemaining,
+          loadRemaining,
+          remainingSubtotal,
+        };
+      }),
+    };
+  }
+
+  private async buildProgressMonitorRows(
+    input: {
+      source: SourceId;
+      previousRows: ReturnType<typeof parseBySource>["cranes"];
+      currentRows: ReturnType<typeof parseBySource>["cranes"];
+      occurredAt: string;
+      sourceUrl: string;
+    },
+  ) {
+    const currentGcSnapshot =
+      input.source === "gwct_gc_remaining"
+        ? this.buildGcSnapshotFromRows(input.currentRows, input.occurredAt, input.sourceUrl)
+        : await loadGcLatestSnapshot();
+    const previousGcSnapshot =
+      input.source === "gwct_gc_remaining"
+        ? this.buildGcSnapshotFromRows(input.previousRows, input.occurredAt, input.sourceUrl)
+        : currentGcSnapshot;
+    const currentWorkStatusRows =
+      input.source === "gwct_work_status"
+        ? input.currentRows
+        : await this.repo.getLatestCraneStatuses("gwct_work_status");
+    const previousWorkStatusRows = input.source === "gwct_work_status" ? input.previousRows : currentWorkStatusRows;
+
+    if (!currentGcSnapshot || !previousGcSnapshot) {
+      return null;
+    }
+
+    return {
+      previousRows: buildGcCraneLiveRows(previousGcSnapshot, null, previousWorkStatusRows),
+      currentRows: buildGcCraneLiveRows(currentGcSnapshot, null, currentWorkStatusRows),
+    };
   }
 
   private async persistScheduleFocusSnapshot(
@@ -469,6 +547,40 @@ export class MonitorService {
               sourceUrl,
             }),
           );
+        }
+
+        if (source === "gwct_gc_remaining" || source === "gwct_work_status") {
+          const progressRows = await this.buildProgressMonitorRows({
+            source,
+            previousRows: prev,
+            currentRows: bundle.cranes,
+            occurredAt,
+            sourceUrl,
+          });
+          if (progressRows) {
+            const previousProgress = buildGcProgressSnapshot(progressRows.previousRows);
+            const currentProgress = buildGcProgressSnapshot(progressRows.currentRows);
+            alerts.push(
+              ...detectGcProgressReachedEvents(
+                previousProgress.items,
+                currentProgress.items,
+                monitorSettings.gcProgressMonitors,
+                source,
+                occurredAt,
+                { sourceUrl },
+              ),
+            );
+            alerts.push(
+              ...detectGcTotalProgressReachedEvents(
+                previousProgress.overallPercent,
+                currentProgress.overallPercent,
+                monitorSettings.gcTotalProgressMonitor,
+                source,
+                occurredAt,
+                { sourceUrl },
+              ),
+            );
+          }
         }
       }
     }

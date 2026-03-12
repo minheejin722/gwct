@@ -136,6 +136,11 @@ const GcRemainingMonitorRuleInputSchema = z.object({
   threshold: z.number().int().nonnegative().optional(),
 });
 
+const ProgressPercentMonitorRuleInputSchema = z.object({
+  enabled: z.boolean().optional(),
+  thresholdPercent: z.number().min(1).max(100).optional(),
+});
+
 const EquipmentMonitorInputSchema = z.object({
   yt: z
     .object({
@@ -157,6 +162,8 @@ const YeosuPilotageMonitorInputSchema = z.object({
 const MonitorConfigInputSchema = z.object({
   gwctEtaMonitor: GwctEtaMonitorInputSchema.optional(),
   gcRemainingMonitors: z.record(z.string(), GcRemainingMonitorRuleInputSchema).optional(),
+  gcProgressMonitors: z.record(z.string(), ProgressPercentMonitorRuleInputSchema).optional(),
+  gcTotalProgressMonitor: ProgressPercentMonitorRuleInputSchema.optional(),
   equipmentMonitor: EquipmentMonitorInputSchema.optional(),
   yeosuPilotageMonitor: YeosuPilotageMonitorInputSchema.optional(),
 });

@@ -75,4 +75,79 @@ describe("gwct gc remaining parser", () => {
     expect(bundle.diagnostics).toHaveLength(1);
     expect(bundle.diagnostics[0]?.reason).toBe("gc remaining candidate tables not found");
   });
+
+  it("uses the 잔량 소계 row as the subtotal when that row is present", () => {
+    const html = `
+      <html>
+        <body>
+          <table class="AA_list">
+            <tr>
+              <th>Gantry Crane No.</th>
+              <th colspan="2">G/C 181</th>
+              <th colspan="2">G/C 182</th>
+              <th colspan="2">G/C 183</th>
+              <th colspan="2">G/C 184</th>
+              <th colspan="2">G/C 185</th>
+              <th colspan="2">G/C 186</th>
+              <th colspan="2">G/C 187</th>
+              <th colspan="2">G/C 188</th>
+              <th colspan="2">G/C 189</th>
+              <th colspan="2">G/C 190</th>
+              <th>양하량</th>
+              <th>적하량</th>
+            </tr>
+            <tr>
+              <td>작업 구분</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+              <td>양하</td><td>적하</td>
+            </tr>
+            <tr>
+              <td>잔량</td>
+              <td></td><td></td>
+              <td></td><td></td>
+              <td></td><td></td>
+              <td></td><td></td>
+              <td>4</td><td>43</td>
+              <td></td><td>37</td>
+              <td></td><td>33</td>
+              <td></td><td></td>
+              <td></td><td></td>
+              <td></td><td></td>
+              <td>4</td><td>113</td>
+            </tr>
+            <tr>
+              <td>잔량 소계</td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td>47</td>
+              <td>37</td>
+              <td>33</td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td>117</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const bundle = parseGwctGcRemaining(html, "2026-03-01T12:04:00.000Z", "gwct_gc_remaining");
+
+    expect(bundle.cranes.find((item) => item.craneId === "GC185")?.dischargeRemaining).toBe(4);
+    expect(bundle.cranes.find((item) => item.craneId === "GC185")?.loadRemaining).toBe(43);
+    expect(bundle.cranes.find((item) => item.craneId === "GC185")?.totalRemaining).toBe(47);
+    expect(bundle.cranes.find((item) => item.craneId === "GC186")?.totalRemaining).toBe(37);
+    expect(bundle.cranes.find((item) => item.craneId === "GC187")?.totalRemaining).toBe(33);
+  });
 });

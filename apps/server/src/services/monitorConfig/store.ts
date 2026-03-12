@@ -12,9 +12,16 @@ export interface GwctEtaMonitorConfig {
   lastChangedAt: string | null;
 }
 
+import { normalizeProgressThresholdPercent } from "@gwct/shared";
+
 export interface GcRemainingMonitorRule {
   enabled: boolean;
   threshold: number;
+}
+
+export interface ProgressPercentMonitorRule {
+  enabled: boolean;
+  thresholdPercent: number;
 }
 
 export interface EquipmentYtMonitorConfig {
@@ -43,6 +50,8 @@ export interface YeosuPilotageMonitorConfig {
 export interface MonitorSettings {
   gwctEtaMonitor: GwctEtaMonitorConfig;
   gcRemainingMonitors: Record<string, GcRemainingMonitorRule>;
+  gcProgressMonitors: Record<string, ProgressPercentMonitorRule>;
+  gcTotalProgressMonitor: ProgressPercentMonitorRule;
   equipmentMonitor: EquipmentMonitorConfig;
   yeosuPilotageMonitor: YeosuPilotageMonitorConfig;
 }
@@ -50,6 +59,8 @@ export interface MonitorSettings {
 export interface MonitorSettingsInput {
   gwctEtaMonitor?: Partial<GwctEtaMonitorConfig>;
   gcRemainingMonitors?: Record<string, Partial<GcRemainingMonitorRule>>;
+  gcProgressMonitors?: Record<string, Partial<ProgressPercentMonitorRule>>;
+  gcTotalProgressMonitor?: Partial<ProgressPercentMonitorRule>;
   equipmentMonitor?: {
     yt?: Partial<EquipmentYtMonitorConfig>;
     gcStaff?: Partial<EquipmentGcStaffMonitorConfig>;
@@ -67,6 +78,10 @@ const DEFAULT_GC_RULE: GcRemainingMonitorRule = {
   enabled: false,
   threshold: 20,
 };
+const DEFAULT_PROGRESS_PERCENT_RULE: ProgressPercentMonitorRule = {
+  enabled: false,
+  thresholdPercent: 100,
+};
 
 const DEFAULT_CONFIG: MonitorSettings = {
   gwctEtaMonitor: {
@@ -78,6 +93,12 @@ const DEFAULT_CONFIG: MonitorSettings = {
   gcRemainingMonitors: Object.fromEntries(
     GC_KEYS.map((gc) => [gc, { ...DEFAULT_GC_RULE }]),
   ) as Record<string, GcRemainingMonitorRule>,
+  gcProgressMonitors: Object.fromEntries(
+    GC_KEYS.map((gc) => [gc, { ...DEFAULT_PROGRESS_PERCENT_RULE }]),
+  ) as Record<string, ProgressPercentMonitorRule>,
+  gcTotalProgressMonitor: {
+    ...DEFAULT_PROGRESS_PERCENT_RULE,
+  },
   equipmentMonitor: {
     yt: {
       enabled: false,
@@ -108,6 +129,10 @@ function normalizeInt(value: unknown, fallback: number, min = 0): number {
 function normalizeTrackingCount(value: unknown, fallback: number): number {
   const parsed = normalizeInt(value, fallback, 1);
   return Math.min(11, Math.max(1, parsed));
+}
+
+function normalizePercent(value: unknown, fallback: number): number {
+  return normalizeProgressThresholdPercent(Number(value), fallback);
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
@@ -150,6 +175,16 @@ function normalizeConfig(input: Partial<MonitorSettings> | null | undefined): Mo
     };
   }
 
+  const gcProgressMonitors: Record<string, ProgressPercentMonitorRule> = {};
+  for (const gc of GC_KEYS) {
+    const fromInput = input?.gcProgressMonitors?.[gc];
+    const fromDefault = DEFAULT_CONFIG.gcProgressMonitors[gc] || DEFAULT_PROGRESS_PERCENT_RULE;
+    gcProgressMonitors[gc] = {
+      enabled: normalizeBoolean(fromInput?.enabled, fromDefault.enabled),
+      thresholdPercent: normalizePercent(fromInput?.thresholdPercent, fromDefault.thresholdPercent),
+    };
+  }
+
   const ytState = normalizeYtState(input?.equipmentMonitor?.yt?.state);
   const ytStateInitialized = Boolean(input?.equipmentMonitor?.yt?.stateInitialized && ytState);
 
@@ -164,6 +199,17 @@ function normalizeConfig(input: Partial<MonitorSettings> | null | undefined): Mo
       lastChangedAt: normalizeText(input?.gwctEtaMonitor?.lastChangedAt),
     },
     gcRemainingMonitors,
+    gcProgressMonitors,
+    gcTotalProgressMonitor: {
+      enabled: normalizeBoolean(
+        input?.gcTotalProgressMonitor?.enabled,
+        DEFAULT_CONFIG.gcTotalProgressMonitor.enabled,
+      ),
+      thresholdPercent: normalizePercent(
+        input?.gcTotalProgressMonitor?.thresholdPercent,
+        DEFAULT_CONFIG.gcTotalProgressMonitor.thresholdPercent,
+      ),
+    },
     equipmentMonitor: {
       yt: {
         enabled: normalizeBoolean(input?.equipmentMonitor?.yt?.enabled, DEFAULT_CONFIG.equipmentMonitor.yt.enabled),
@@ -203,6 +249,14 @@ function mergeConfig(current: MonitorSettings, patch: MonitorSettingsInput): Mon
     };
   }
 
+  const gcProgressMerged: Record<string, ProgressPercentMonitorRule> = {};
+  for (const gc of GC_KEYS) {
+    gcProgressMerged[gc] = {
+      ...current.gcProgressMonitors[gc],
+      ...(patch.gcProgressMonitors?.[gc] || {}),
+    };
+  }
+
   const merged: Partial<MonitorSettings> = {
     ...current,
     gwctEtaMonitor: {
@@ -210,6 +264,11 @@ function mergeConfig(current: MonitorSettings, patch: MonitorSettingsInput): Mon
       ...(patch.gwctEtaMonitor || {}),
     },
     gcRemainingMonitors: gcMerged,
+    gcProgressMonitors: gcProgressMerged,
+    gcTotalProgressMonitor: {
+      ...current.gcTotalProgressMonitor,
+      ...(patch.gcTotalProgressMonitor || {}),
+    },
     equipmentMonitor: {
       yt: {
         ...current.equipmentMonitor.yt,

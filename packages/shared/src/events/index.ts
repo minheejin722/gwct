@@ -32,6 +32,8 @@ export const EVENT_TO_DEEPLINK: Record<string, DeepLinkTarget> = {
   gwct_eta_changed: "vessels",
   CRANE_THRESHOLD: "cranes",
   gc_remaining_low: "cranes",
+  gc_progress_reached: "cranes",
+  gc_total_progress_reached: "cranes",
   EQUIPMENT_LOGIN: "equipment",
   EQUIPMENT_OPERATOR_CHANGED: "equipment",
   gc_driver_login: "equipment",
