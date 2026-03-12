@@ -290,6 +290,9 @@ export type YtMasterCallHandlingMode = z.infer<typeof YtMasterCallHandlingModeSc
 export const YtMasterCallReasonSchema = z.enum(["tractor_inspection", "restroom", "other", "emergency_accident"]);
 export type YtMasterCallReason = z.infer<typeof YtMasterCallReasonSchema>;
 
+export const YtMasterCallArchiveKindSchema = z.enum(["tractor_inspection", "other"]);
+export type YtMasterCallArchiveKind = z.infer<typeof YtMasterCallArchiveKindSchema>;
+
 export const YT_MASTER_CALL_REASON_LABELS: Record<YtMasterCallReason, string> = {
   tractor_inspection: "트랙터 점검",
   restroom: "화장실",
@@ -511,6 +514,15 @@ export const YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_OPTIONS: readonly YtMas
   "vessel_done",
 ];
 
+export const YT_MASTER_CALL_DUPLICATE_LOCKED_OTHER_SUBREASON_OPTIONS: readonly YtMasterCallOtherSubreason[] = [
+  "shift_shuttle",
+  "transshipment_done",
+  "vessel_done",
+  "lunch_shuttle",
+];
+
+export const YT_MASTER_CALL_DUPLICATE_LOCK_WINDOW_MS = 20 * 60 * 1000;
+
 export const YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_OPTIONS: readonly YtMasterCallTractorSubreason[] = [
   "engine_stall",
   "starting_failure",
@@ -536,6 +548,9 @@ const YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_SET = new Set<string>(
 const YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_SET = new Set<string>(
   YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_OPTIONS,
 );
+const YT_MASTER_CALL_DUPLICATE_LOCKED_OTHER_SUBREASON_SET = new Set<string>(
+  YT_MASTER_CALL_DUPLICATE_LOCKED_OTHER_SUBREASON_OPTIONS,
+);
 
 export function isYtMasterCallTractorSubreason(
   value: string,
@@ -555,15 +570,188 @@ export function isYtMasterCallMessageOnlyOtherSubreason(
   return YT_MASTER_CALL_MESSAGE_ONLY_OTHER_SUBREASON_SET.has(value);
 }
 
+export function isYtMasterCallDuplicateLockedOtherSubreason(
+  value: string,
+): value is YtMasterCallOtherSubreason {
+  return YT_MASTER_CALL_DUPLICATE_LOCKED_OTHER_SUBREASON_SET.has(value);
+}
+
 export function isYtMasterCallMessageOnlyTractorSubreason(
   value: string,
 ): value is YtMasterCallTractorSubreason {
   return YT_MASTER_CALL_MESSAGE_ONLY_TRACTOR_SUBREASON_SET.has(value);
 }
 
+const YT_MASTER_CALL_DAY_OFF_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function parseYtMasterCallDayOffSingleDateValue(value: string): {
+  year: number;
+  month: number;
+  day: number;
+} | null {
+  const match = YT_MASTER_CALL_DAY_OFF_DATE_REGEX.exec(value);
+  if (!match) {
+    return null;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return {
+    year,
+    month,
+    day,
+  };
+}
+
+function getYtMasterCallDayOffDateTimestamp(value: { year: number; month: number; day: number }): number {
+  return Date.UTC(value.year, value.month - 1, value.day);
+}
+
+function normalizeYtMasterCallDayOffDateList(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function parseYtMasterCallDayOffDateListValue(value: string): string[] | null {
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!items.length) {
+    return null;
+  }
+  if (items.some((item) => item.includes("~") || !parseYtMasterCallDayOffSingleDateValue(item))) {
+    return null;
+  }
+  return normalizeYtMasterCallDayOffDateList(items);
+}
+
+function parseYtMasterCallLegacyDayOffRangeValue(value: string): { start: string; end: string | null } | null {
+  const [rawStartValue, rawEndValue, extraValue] = value.split("~").map((item) => item.trim());
+  if (!rawStartValue || extraValue) {
+    return null;
+  }
+
+  const startValue = parseYtMasterCallDayOffSingleDateValue(rawStartValue);
+  if (!startValue) {
+    return null;
+  }
+  if (!rawEndValue) {
+    return { start: rawStartValue, end: null };
+  }
+
+  const endValue = parseYtMasterCallDayOffSingleDateValue(rawEndValue);
+  if (!endValue) {
+    return null;
+  }
+
+  if (getYtMasterCallDayOffDateTimestamp(endValue) < getYtMasterCallDayOffDateTimestamp(startValue)) {
+    return null;
+  }
+
+  return {
+    start: rawStartValue,
+    end: rawEndValue,
+  };
+}
+
+export function isYtMasterCallDayOffDateValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed.length) {
+    return false;
+  }
+  if (trimmed.includes(",")) {
+    return Boolean(parseYtMasterCallDayOffDateListValue(trimmed));
+  }
+  return Boolean(parseYtMasterCallLegacyDayOffRangeValue(trimmed));
+}
+
+function formatYtMasterCallDayOffSingleDateValue(value: { year: number; month: number; day: number }): string {
+  return `${String(value.month).padStart(2, "0")}.${String(value.day).padStart(2, "0")}`;
+}
+
+function formatYtMasterCallDayOffRangeSegment(values: Array<{ year: number; month: number; day: number }>): string {
+  const first = values[0];
+  const last = values[values.length - 1];
+  const formattedFirst = formatYtMasterCallDayOffSingleDateValue(first);
+  const formattedLast = formatYtMasterCallDayOffSingleDateValue(last);
+  return formattedFirst === formattedLast ? formattedFirst : `${formattedFirst}~${formattedLast}`;
+}
+
+function formatYtMasterCallDayOffDateValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.length) {
+    return null;
+  }
+  if (trimmed.includes(",")) {
+    const listValues = parseYtMasterCallDayOffDateListValue(trimmed);
+    if (!listValues) {
+      return null;
+    }
+    const parsedValues = listValues
+      .map((item) => parseYtMasterCallDayOffSingleDateValue(item))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    if (!parsedValues.length) {
+      return null;
+    }
+
+    const segments: Array<Array<{ year: number; month: number; day: number }>> = [];
+    for (const parsedValue of parsedValues) {
+      const currentSegment = segments[segments.length - 1];
+      if (!currentSegment) {
+        segments.push([parsedValue]);
+        continue;
+      }
+
+      const lastValue = currentSegment[currentSegment.length - 1];
+      const isNextConsecutiveDay =
+        getYtMasterCallDayOffDateTimestamp(parsedValue) - getYtMasterCallDayOffDateTimestamp(lastValue) ===
+        24 * 60 * 60 * 1000;
+
+      if (isNextConsecutiveDay) {
+        currentSegment.push(parsedValue);
+        continue;
+      }
+
+      segments.push([parsedValue]);
+    }
+
+    return segments.map(formatYtMasterCallDayOffRangeSegment).join(", ");
+  }
+
+  const legacyRangeValue = parseYtMasterCallLegacyDayOffRangeValue(trimmed);
+  if (!legacyRangeValue) {
+    return null;
+  }
+  const startValue = parseYtMasterCallDayOffSingleDateValue(legacyRangeValue.start);
+  if (!startValue) {
+    return null;
+  }
+  if (!legacyRangeValue.end) {
+    return formatYtMasterCallDayOffSingleDateValue(startValue);
+  }
+  const endValue = parseYtMasterCallDayOffSingleDateValue(legacyRangeValue.end);
+  if (!endValue) {
+    return null;
+  }
+  const formattedStartValue = formatYtMasterCallDayOffSingleDateValue(startValue);
+  const formattedEndValue = formatYtMasterCallDayOffSingleDateValue(endValue);
+  return formattedStartValue === formattedEndValue
+    ? formattedStartValue
+    : `${formattedStartValue}~${formattedEndValue}`;
+}
+
 export function getYtMasterCallReasonDetailLabel(
   reasonCode: YtMasterCallReason,
   reasonDetailCode?: YtMasterCallReasonDetailCode | null,
+  reasonDetailValue?: string | null,
 ): string | null {
   if (!reasonDetailCode) {
     return null;
@@ -572,7 +760,12 @@ export function getYtMasterCallReasonDetailLabel(
     return YT_MASTER_CALL_TRACTOR_SUBREASON_LABELS[reasonDetailCode];
   }
   if (reasonCode === "other" && isYtMasterCallOtherSubreason(reasonDetailCode)) {
-    return YT_MASTER_CALL_OTHER_SUBREASON_LABELS[reasonDetailCode];
+    const baseLabel = YT_MASTER_CALL_OTHER_SUBREASON_LABELS[reasonDetailCode];
+    if (reasonDetailCode === "day_off_schedule" && reasonDetailValue) {
+      const formattedDate = formatYtMasterCallDayOffDateValue(reasonDetailValue);
+      return formattedDate ? `${baseLabel} ${formattedDate}` : baseLabel;
+    }
+    return baseLabel;
   }
   return null;
 }
@@ -581,6 +774,9 @@ export function getYtMasterCallHandlingMode(
   reasonCode: YtMasterCallReason,
   reasonDetailCode?: YtMasterCallReasonDetailCode | null,
 ): YtMasterCallHandlingMode {
+  if (reasonCode === "emergency_accident") {
+    return "message";
+  }
   if (
     reasonCode === "tractor_inspection" &&
     reasonDetailCode &&
@@ -605,6 +801,59 @@ export function formatYtMasterCallReasonDisplay(
   return reasonDetailLabel ? `${reasonLabel} · ${reasonDetailLabel}` : reasonLabel;
 }
 
+export function getYtMasterCallArchiveKind(reasonCode: YtMasterCallReason): YtMasterCallArchiveKind | null {
+  if (reasonCode === "tractor_inspection") {
+    return "tractor_inspection";
+  }
+  if (reasonCode === "other") {
+    return "other";
+  }
+  return null;
+}
+
+const YT_DRIVER_IDENTITY_SEGMENT_REGEX = /[0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ]+/g;
+
+function stripEdgeYtMarkers(value: string): string {
+  let next = value;
+  while (/^YT/i.test(next)) {
+    next = next.slice(2);
+  }
+  while (/YT$/i.test(next)) {
+    next = next.slice(0, -2);
+  }
+  return next;
+}
+
+export function normalizeYtDriverIdentityInput(rawValue: string): {
+  normalizedInput: string;
+  ytNumber: string;
+  ytNumberDigits: string;
+  name: string;
+} {
+  const normalizedInput = rawValue.normalize("NFKC").trim();
+  if (!normalizedInput.length) {
+    throw new Error("YT 번호와 이름을 입력해 주세요.");
+  }
+
+  const collapsed = (normalizedInput.match(YT_DRIVER_IDENTITY_SEGMENT_REGEX) ?? []).join("");
+  const ytNumberDigits = collapsed.replace(/[^0-9]/g, "");
+  if (!ytNumberDigits.length) {
+    throw new Error("입력값에서 YT 번호를 찾을 수 없습니다.");
+  }
+
+  const name = stripEdgeYtMarkers(collapsed.replace(/[0-9]/g, ""));
+  if (!name.length) {
+    throw new Error("입력값에서 이름을 찾을 수 없습니다.");
+  }
+
+  return {
+    normalizedInput,
+    ytNumber: `YT-${ytNumberDigits}`,
+    ytNumberDigits,
+    name,
+  };
+}
+
 export const YtMasterCallRegistrationSchema = z.object({
   deviceId: z.string(),
   role: YtMasterCallRoleSchema,
@@ -625,6 +874,7 @@ export const YtMasterCallQueueEntrySchema = z.object({
   reasonLabel: z.string(),
   reasonDetailCode: YtMasterCallReasonDetailCodeSchema.nullable().optional().default(null),
   reasonDetailLabel: z.string().nullable().optional().default(null),
+  reasonDetailValue: z.string().trim().min(1).nullable().optional().default(null),
   handlingMode: YtMasterCallHandlingModeSchema.default("decision"),
   status: YtMasterCallStatusSchema,
   createdAt: z.string(),
@@ -632,6 +882,10 @@ export const YtMasterCallQueueEntrySchema = z.object({
   resolvedAt: z.string().nullable(),
   resolvedByDeviceId: z.string().nullable(),
   resolvedByName: z.string().nullable(),
+  hiddenAt: z.string().nullable().optional().default(null),
+  hiddenByDeviceId: z.string().nullable().optional().default(null),
+  archivedAt: z.string().nullable().optional().default(null),
+  archivedByDeviceId: z.string().nullable().optional().default(null),
 });
 export type YtMasterCallQueueEntry = z.infer<typeof YtMasterCallQueueEntrySchema>;
 
@@ -642,6 +896,12 @@ export const YtMasterCallMasterAssignmentSchema = z.object({
 });
 export type YtMasterCallMasterAssignment = z.infer<typeof YtMasterCallMasterAssignmentSchema>;
 
+export const YtMasterCallArchivesSchema = z.object({
+  tractorInspection: z.array(YtMasterCallQueueEntrySchema),
+  other: z.array(YtMasterCallQueueEntrySchema),
+});
+export type YtMasterCallArchives = z.infer<typeof YtMasterCallArchivesSchema>;
+
 export const YtMasterCallLiveStateSchema = z.object({
   deviceId: z.string(),
   registration: YtMasterCallRegistrationSchema.nullable(),
@@ -649,6 +909,7 @@ export const YtMasterCallLiveStateSchema = z.object({
   availableMasterSlots: z.array(YtMasterCallMasterSlotSchema),
   currentCall: YtMasterCallQueueEntrySchema.nullable(),
   queue: z.array(YtMasterCallQueueEntrySchema),
+  archives: YtMasterCallArchivesSchema,
   pendingCount: z.number().int().nonnegative(),
 });
 export type YtMasterCallLiveState = z.infer<typeof YtMasterCallLiveStateSchema>;
@@ -672,8 +933,17 @@ export const YtMasterCallCreateInputSchema = z.object({
   deviceId: z.string(),
   reasonCode: YtMasterCallReasonSchema,
   reasonDetailCode: YtMasterCallReasonDetailCodeSchema.nullable().optional().default(null),
+  reasonDetailValue: z.string().trim().min(1).nullable().optional().default(null),
 }).superRefine((value, ctx) => {
+  const reasonDetailValue = value.reasonDetailValue || null;
   if (!value.reasonDetailCode) {
+    if (reasonDetailValue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonDetailValue"],
+        message: "Reason detail value requires a reason detail code.",
+      });
+    }
     return;
   }
   if (value.reasonCode === "tractor_inspection") {
@@ -682,6 +952,13 @@ export const YtMasterCallCreateInputSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ["reasonDetailCode"],
         message: "Tractor detail is allowed only for tractor inspection calls.",
+      });
+    }
+    if (reasonDetailValue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonDetailValue"],
+        message: "Reason detail value is not allowed for tractor inspection calls.",
       });
     }
     return;
@@ -694,6 +971,28 @@ export const YtMasterCallCreateInputSchema = z.object({
         message: "Other detail is allowed only for other calls.",
       });
     }
+    if (value.reasonDetailCode === "day_off_schedule") {
+      if (!reasonDetailValue) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["reasonDetailValue"],
+          message: "Day-off schedule calls require a date.",
+        });
+      } else if (!isYtMasterCallDayOffDateValue(reasonDetailValue)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["reasonDetailValue"],
+          message:
+            "Day-off schedule date must be a valid YYYY-MM-DD, comma-separated YYYY-MM-DD values, or a legacy YYYY-MM-DD~YYYY-MM-DD range.",
+        });
+      }
+    } else if (reasonDetailValue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reasonDetailValue"],
+        message: "Reason detail value is only allowed for day-off schedule calls.",
+      });
+    }
     return;
   }
   if (value.reasonDetailCode) {
@@ -701,6 +1000,13 @@ export const YtMasterCallCreateInputSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["reasonDetailCode"],
       message: "Reason detail is allowed only for tractor inspection or other calls.",
+    });
+  }
+  if (reasonDetailValue) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reasonDetailValue"],
+      message: "Reason detail value is allowed only for day-off schedule calls.",
     });
   }
 });
@@ -716,6 +1022,15 @@ export const YtMasterCallCancelInputSchema = z.object({
   deviceId: z.string(),
 });
 export type YtMasterCallCancelInput = z.infer<typeof YtMasterCallCancelInputSchema>;
+
+export const YtMasterCallVisibilityActionSchema = z.enum(["hide", "archive", "restore"]);
+export type YtMasterCallVisibilityAction = z.infer<typeof YtMasterCallVisibilityActionSchema>;
+
+export const YtMasterCallVisibilityInputSchema = z.object({
+  deviceId: z.string(),
+  action: YtMasterCallVisibilityActionSchema,
+});
+export type YtMasterCallVisibilityInput = z.infer<typeof YtMasterCallVisibilityInputSchema>;
 
 export const GwctEtaDirectionSchema = z.enum(["earlier", "later"]);
 export type GwctEtaDirection = z.infer<typeof GwctEtaDirectionSchema>;

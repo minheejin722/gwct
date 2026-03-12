@@ -13,7 +13,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import type { YtMasterCallLiveState, YtMasterCallRole } from "@gwct/shared";
+import {
+  normalizeYtDriverIdentityInput,
+  type YtMasterCallLiveState,
+  type YtMasterCallRole,
+} from "@gwct/shared";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { TactilePressable } from "../components/TactilePressable";
 import { useEndpoint } from "../hooks/useEndpoint";
@@ -34,6 +38,12 @@ function masterSlotText(data: YtMasterCallLiveState | null): string {
 const FOCUSED_INPUT_KEYBOARD_GAP = 24;
 const FOCUSED_INPUT_SCROLL_DELAY_MS = 64;
 
+function formatDriverIdentityInput(ytNumber: string | null | undefined, name: string | null | undefined): string {
+  const digits = ytNumber ? ytNumber.replace(/^YT-/, "") : "";
+  const trimmedName = name?.trim() || "";
+  return [digits, trimmedName].filter(Boolean).join(" ");
+}
+
 export default function YtMasterCallSettingsScreen() {
   const { deviceId, isReady } = useLocalDeviceId();
 
@@ -53,7 +63,7 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
   const { colors } = useAppPreferences();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const scrollRef = useRef<ScrollView | null>(null);
-  const ytNumberFieldRef = useRef<View | null>(null);
+  const driverIdentityFieldRef = useRef<View | null>(null);
   const nameFieldRef = useRef<View | null>(null);
   const focusedFieldRef = useRef<View | null>(null);
   const scrollOffsetYRef = useRef(0);
@@ -63,7 +73,7 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
   const { data, loading, error, refresh, setData } = useEndpoint<YtMasterCallLiveState>(API_URLS.ytMasterCallLive(deviceId));
   const [selectedRole, setSelectedRole] = useState<YtMasterCallRole>("driver");
   const [nameInput, setNameInput] = useState("");
-  const [ytNumberInput, setYtNumberInput] = useState("");
+  const [driverIdentityInput, setDriverIdentityInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
 
@@ -111,7 +121,11 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
     }
     setSelectedRole(data.registration.role);
     setNameInput(data.registration.name);
-    setYtNumberInput(data.registration.ytNumber ? data.registration.ytNumber.replace(/^YT-/, "") : "");
+    setDriverIdentityInput(
+      data.registration.role === "driver"
+        ? formatDriverIdentityInput(data.registration.ytNumber, data.registration.name)
+        : "",
+    );
   }, [data?.registration]);
 
   const ensureFocusedFieldVisible = (target: View | null) => {
@@ -155,21 +169,28 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
   };
 
   const saveRole = async () => {
+    if (saving || clearing) {
+      return;
+    }
+
     setSaving(true);
     try {
-      const saved =
-        selectedRole === "master"
-          ? await saveYtMasterCallRegistration({
-              deviceId,
-              role: "master",
-              name: nameInput,
-            })
-          : await saveYtMasterCallRegistration({
-              deviceId,
-              role: "driver",
-              name: nameInput,
-              ytNumber: ytNumberInput,
-            });
+      let saved: YtMasterCallLiveState;
+      if (selectedRole === "master") {
+        saved = await saveYtMasterCallRegistration({
+          deviceId,
+          role: "master",
+          name: nameInput,
+        });
+      } else {
+        const parsedDriver = normalizeYtDriverIdentityInput(driverIdentityInput);
+        saved = await saveYtMasterCallRegistration({
+          deviceId,
+          role: "driver",
+          name: parsedDriver.name,
+          ytNumber: parsedDriver.ytNumberDigits,
+        });
+      }
       setData(saved);
     } catch (saveError) {
       Alert.alert("저장 실패", (saveError as Error).message);
@@ -191,7 +212,7 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
               const cleared = await clearYtMasterCallRegistration(deviceId);
               setData(cleared);
               setNameInput("");
-              setYtNumberInput("");
+              setDriverIdentityInput("");
               setSelectedRole("driver");
             } catch (clearError) {
               Alert.alert("해제 실패", (clearError as Error).message);
@@ -255,7 +276,7 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
               YT Driver
             </Text>
             <Text style={[styles.roleOptionText, selectedRole === "driver" ? styles.roleOptionTextActive : null]}>
-              YT 번호와 이름을 등록합니다.
+              YT 번호와 이름을 한 줄로 등록합니다.
             </Text>
           </TactilePressable>
 
@@ -287,30 +308,38 @@ function YtMasterCallSettingsContent({ deviceId }: { deviceId: string }) {
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{selectedRole === "master" ? "YT Master 등록" : "YT Driver 등록"}</Text>
         {selectedRole === "driver" ? (
-          <View ref={ytNumberFieldRef} style={styles.formGroup}>
-            <Text style={styles.inputLabel}>YT 번호</Text>
+          <View ref={driverIdentityFieldRef} style={styles.formGroup}>
+            <Text style={styles.inputLabel}>YT 번호 / 이름</Text>
             <TextInput
-              value={ytNumberInput}
-              onChangeText={setYtNumberInput}
-              onFocus={() => scheduleFocusedFieldScroll(ytNumberFieldRef.current)}
-              placeholder="예: 45"
+              value={driverIdentityInput}
+              onChangeText={setDriverIdentityInput}
+              onFocus={() => scheduleFocusedFieldScroll(driverIdentityFieldRef.current)}
+              placeholder="예: 600 홍길동"
               placeholderTextColor={colors.secondaryText}
               style={styles.input}
               autoCapitalize="characters"
+              returnKeyType="search"
+              enablesReturnKeyAutomatically
+              onSubmitEditing={() => void saveRole()}
+            />
+            <Text style={styles.inputHint}>띄어쓰기와 기호가 섞여도 숫자와 이름을 자동으로 분리합니다.</Text>
+          </View>
+        ) : (
+          <View ref={nameFieldRef} style={styles.formGroup}>
+            <Text style={styles.inputLabel}>이름</Text>
+            <TextInput
+              value={nameInput}
+              onChangeText={setNameInput}
+              onFocus={() => scheduleFocusedFieldScroll(nameFieldRef.current)}
+              placeholder="반장 이름"
+              placeholderTextColor={colors.secondaryText}
+              style={styles.input}
+              returnKeyType="search"
+              enablesReturnKeyAutomatically
+              onSubmitEditing={() => void saveRole()}
             />
           </View>
-        ) : null}
-        <View ref={nameFieldRef} style={styles.formGroup}>
-          <Text style={styles.inputLabel}>이름</Text>
-          <TextInput
-            value={nameInput}
-            onChangeText={setNameInput}
-            onFocus={() => scheduleFocusedFieldScroll(nameFieldRef.current)}
-            placeholder={selectedRole === "master" ? "반장 이름" : "기사 이름"}
-            placeholderTextColor={colors.secondaryText}
-            style={styles.input}
-          />
-        </View>
+        )}
 
         <View style={styles.buttonRow}>
           <TactilePressable
@@ -420,6 +449,7 @@ function createStyles(colors: ReturnType<typeof useAppPreferences>["colors"]) {
     slotWarning: { fontSize: 13, lineHeight: 18, color: colors.warning, fontWeight: "700" },
     formGroup: { gap: 8 },
     inputLabel: { fontSize: 14, fontWeight: "700", color: colors.primaryText },
+    inputHint: { fontSize: 12, lineHeight: 17, color: colors.secondaryText },
     input: {
       borderWidth: 1,
       borderColor: colors.border,

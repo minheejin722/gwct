@@ -176,7 +176,7 @@ describe("GwctCadenceGovernor", () => {
       },
     });
 
-    expect(governor.snapshot().mode).toBe("fast");
+    expect(governor.snapshot().mode).toBe("relaxed");
 
     governor.observe({
       source: "gwct_equipment_status",
@@ -250,7 +250,7 @@ describe("GwctCadenceGovernor", () => {
       },
     });
 
-    expect(governor.snapshot().mode).toBe("fast");
+    expect(governor.snapshot().mode).toBe("relaxed");
     expect(governor.snapshot().scheduleSignal.allRowsCyan).toBe(true);
 
     governor.observe({
@@ -335,6 +335,159 @@ describe("GwctCadenceGovernor", () => {
     expect(governor.snapshot().mode).toBe("relaxed");
   });
 
+  it("enters relaxed mode during meal stop before work starts even without the three aligned idle signals", () => {
+    const governor = new GwctCadenceGovernor({ info() {} } as any);
+    const seenAt = kst("2026/03/10 12:05");
+
+    governor.observe({
+      source: "gwct_schedule_list",
+      seenAt,
+      html: "",
+      bundle: {
+        vessels: [vessel({ eta: kst("2026/03/10 12:30"), rowColor: "yellow", precedingGreenCount: 0 })],
+        cranes: [],
+        equipment: [],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    governor.observe({
+      source: "gwct_work_status",
+      seenAt,
+      html: currentWorkSummaryHtml("03/10 12:30", "0%"),
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    governor.observe({
+      source: "gwct_equipment_status",
+      seenAt,
+      html: "",
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [equipmentRow({ equipmentId: "YT501", operatorName: "Kim", stopReason: "식사시간" })],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    const snapshot = governor.snapshot();
+    expect(snapshot.scheduleSignal.ready).toBe(false);
+    expect(snapshot.equipmentSignal.ready).toBe(false);
+    expect(snapshot.equipmentSignal.mealStopObserved).toBe(true);
+    expect(snapshot.workSignal.hasStartedWork).toBe(false);
+    expect(snapshot.mode).toBe("relaxed");
+  });
+
+  it("keeps relaxed mode through meal-stop login churn while active YT logins remain zero", () => {
+    const governor = new GwctCadenceGovernor({ info() {} } as any);
+    const seenAt = kst("2026/03/10 12:05");
+
+    governor.observe({
+      source: "gwct_work_status",
+      seenAt,
+      html: currentWorkSummaryHtml("03/10 12:30", "0%"),
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    governor.observe({
+      source: "gwct_equipment_status",
+      seenAt,
+      html: "",
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [equipmentRow({ equipmentId: "YT501", operatorName: "Kim", stopReason: "식사시간" })],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    expect(governor.snapshot().mode).toBe("relaxed");
+
+    governor.observe({
+      source: "gwct_equipment_status",
+      seenAt: kst("2026/03/10 12:08"),
+      html: "",
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [
+          equipmentRow({ equipmentId: "YT501", operatorName: "Kim", stopReason: "식사시간" }),
+          equipmentRow({ equipmentId: "GC181", operatorName: "Hong", loginText: "03-10 12:08" }),
+        ],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    expect(governor.snapshot().mode).toBe("relaxed");
+
+    governor.observe({
+      source: "gwct_work_status",
+      seenAt: kst("2026/03/10 12:10"),
+      html: currentWorkSummaryHtml("03/10 12:30", "15%"),
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    expect(governor.snapshot().workSignal.hasStartedWork).toBe(true);
+    expect(governor.snapshot().mode).toBe("relaxed");
+  });
+
+  it("enters relaxed mode immediately when active YT logins are zero even if the other signals are not ready", () => {
+    const governor = new GwctCadenceGovernor({ info() {} } as any);
+    const seenAt = kst("2026/03/10 03:00");
+
+    governor.observe({
+      source: "gwct_equipment_status",
+      seenAt,
+      html: "",
+      bundle: {
+        vessels: [],
+        cranes: [],
+        equipment: [
+          equipmentRow({ equipmentId: "GC181", operatorName: "A", loginText: "03-10 03:00" }),
+          equipmentRow({ equipmentId: "TC215", operatorName: "B", loginText: "03-10 03:00" }),
+        ],
+        yt: null,
+        weather: null,
+        diagnostics: [],
+      },
+    });
+
+    const snapshot = governor.snapshot();
+    expect(snapshot.scheduleSignal.ready).toBe(false);
+    expect(snapshot.workSignal.ready).toBe(false);
+    expect(snapshot.equipmentSignal.ytActiveCount).toBe(0);
+    expect(snapshot.mode).toBe("relaxed");
+  });
+
   it("ignores support-equipment logins when YT logins are absent", () => {
     const governor = new GwctCadenceGovernor({ info() {} } as any);
     const seenAt = kst("2026/03/10 03:00");
@@ -385,7 +538,7 @@ describe("GwctCadenceGovernor", () => {
       },
     });
 
-    expect(governor.snapshot().mode).toBe("fast");
+    expect(governor.snapshot().mode).toBe("relaxed");
     expect(governor.snapshot().equipmentSignal.ytActiveCount).toBe(0);
     expect(governor.snapshot().equipmentSignal.relevantActiveCount).toBe(0);
 
@@ -431,7 +584,7 @@ describe("GwctCadenceGovernor", () => {
     expect(governor.snapshot().mode).toBe("relaxed");
   });
 
-  it("returns to fast mode and holds it until the next shift boundary when new login activity appears", () => {
+  it("returns to fast mode and holds it until the next shift boundary when new YT login activity appears", () => {
     const governor = new GwctCadenceGovernor({ info() {} } as any);
     const relaxedSeenAt = kst("2026/03/10 03:00");
 
@@ -498,8 +651,8 @@ describe("GwctCadenceGovernor", () => {
         vessels: [],
         cranes: [],
         equipment: [
-          equipmentRow({ equipmentId: "GC181", operatorName: "홍길동", loginText: "03-10 03:05" }),
-          equipmentRow({ equipmentId: "YT501" }),
+          equipmentRow({ equipmentId: "GC181" }),
+          equipmentRow({ equipmentId: "YT501", operatorName: "A", loginText: "03-10 03:05" }),
         ],
         yt: null,
         weather: null,

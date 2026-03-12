@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearYtMasterCallStateForTest } from "../src/services/ytMasterCall/store.js";
 
+process.env.YT_MASTER_CALL_STATE_FILE = "yt_master_call_state.api.test.json";
+
 if (process.env.MODE !== "live" && process.env.MODE !== "fixture") {
   process.env.MODE = "fixture";
 }
@@ -282,7 +284,7 @@ describe("yt master call api", () => {
     });
   });
 
-  it("pushes an emergency direct call to masters with the emergency label", async () => {
+  it("pushes emergency accident as a message-only call to masters with the emergency label", async () => {
     const pushed: Array<Record<string, unknown>> = [];
     const app = Fastify();
     createdApps.push(app);
@@ -344,7 +346,8 @@ describe("yt master call api", () => {
         reasonLabel: "긴급 사고",
         reasonDetailCode: null,
         reasonDetailLabel: null,
-        status: "pending",
+        handlingMode: "message",
+        status: "sent",
       },
     });
 
@@ -528,7 +531,167 @@ describe("yt master call api", () => {
     });
   });
 
-  it("acknowledges a message-only call and notifies the driver with the confirmed message state", async () => {
+  it("creates a day-off schedule other call with the selected date in the payload and push text", async () => {
+    const pushed: Array<Record<string, unknown>> = [];
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {} as any,
+      monitorService: {} as any,
+      sseHub: {
+        broadcast() {},
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+      notificationService: {
+        async dispatchToDeviceIds(input: Record<string, unknown>) {
+          pushed.push(input);
+        },
+      } as any,
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "master-dayoff-1",
+        role: "master",
+        name: "Lee",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-dayoff-1",
+        role: "driver",
+        name: "Kim",
+        ytNumber: "48",
+      },
+    });
+
+    const createCall = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-dayoff-1",
+        reasonCode: "other",
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailValue: "2026-03-25",
+      },
+    });
+
+    expect(createCall.statusCode).toBe(200);
+    expect(createCall.json()).toMatchObject({
+      currentCall: {
+        reasonCode: "other",
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailLabel: "휴무일정 03.25",
+        reasonDetailValue: "2026-03-25",
+        handlingMode: "decision",
+        status: "pending",
+      },
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({
+      eventType: "yt_master_call_created",
+      body: "YT-48 Kim 기타 사유 · 휴무일정 03.25",
+      raw: {
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailLabel: "휴무일정 03.25",
+        reasonDetailValue: "2026-03-25",
+      },
+    });
+  });
+
+  it("creates a multi-date day-off schedule payload and push text", async () => {
+    const pushed: Array<Record<string, unknown>> = [];
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {} as any,
+      monitorService: {} as any,
+      sseHub: {
+        broadcast() {},
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+      notificationService: {
+        async dispatchToDeviceIds(input: Record<string, unknown>) {
+          pushed.push(input);
+        },
+      } as any,
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "master-dayoff-2",
+        role: "master",
+        name: "Lee",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-dayoff-2",
+        role: "driver",
+        name: "Kim",
+        ytNumber: "49",
+      },
+    });
+
+    const createCall = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-dayoff-2",
+        reasonCode: "other",
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailValue: "2026-03-25,2026-03-26,2026-03-27,2026-04-02",
+      },
+    });
+
+    expect(createCall.statusCode).toBe(200);
+    expect(createCall.json()).toMatchObject({
+      currentCall: {
+        reasonCode: "other",
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailLabel: "휴무일정 03.25~03.27, 04.02",
+        reasonDetailValue: "2026-03-25,2026-03-26,2026-03-27,2026-04-02",
+        handlingMode: "decision",
+        status: "pending",
+      },
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({
+      eventType: "yt_master_call_created",
+      body: "YT-49 Kim 기타 사유 · 휴무일정 03.25~03.27, 04.02",
+      raw: {
+        reasonDetailCode: "day_off_schedule",
+        reasonDetailLabel: "휴무일정 03.25~03.27, 04.02",
+        reasonDetailValue: "2026-03-25,2026-03-26,2026-03-27,2026-04-02",
+      },
+    });
+  });
+
+  it("acknowledges a message-only call, notifies the driver, and keeps it visible in the master queue", async () => {
     const broadcasts: Array<{ eventName: string; payload: unknown }> = [];
     const pushed: Array<Record<string, unknown>> = [];
     const app = Fastify();
@@ -639,7 +802,14 @@ describe("yt master call api", () => {
     });
     expect(masterLiveAfter.statusCode).toBe(200);
     expect(masterLiveAfter.json()).toMatchObject({
-      queue: [],
+      queue: [
+        {
+          id: callId,
+          status: "acknowledged",
+          handlingMode: "message",
+          resolvedByName: "Lee",
+        },
+      ],
       pendingCount: 0,
     });
 
@@ -674,6 +844,273 @@ describe("yt master call api", () => {
     expect((broadcasts[4]?.payload as { status?: string; title?: string; message?: string })?.message).toBe(
       "YT-47 Kim 메시지가 확인되었습니다.",
     );
+  });
+
+  it("archives and restores a tractor inspection call through the visibility route", async () => {
+    const broadcasts: Array<{ eventName: string; payload: unknown }> = [];
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {} as any,
+      monitorService: {} as any,
+      sseHub: {
+        broadcast(eventName: string, payload: unknown) {
+          broadcasts.push({ eventName, payload });
+        },
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+      notificationService: {
+        async dispatchToDeviceIds() {
+          return;
+        },
+      } as any,
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "master-9",
+        role: "master",
+        name: "Lee",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-49",
+        role: "driver",
+        name: "Kim",
+        ytNumber: "49",
+      },
+    });
+
+    const createCall = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-49",
+        reasonCode: "tractor_inspection",
+        reasonDetailCode: "flat_tire",
+      },
+    });
+    const callId = (createCall.json() as { currentCall?: { id?: string } }).currentCall?.id;
+
+    expect(callId).toBeTruthy();
+
+    const archiveCall = await app.inject({
+      method: "POST",
+      url: `/api/yt-master-call/calls/${callId}/visibility`,
+      payload: {
+        deviceId: "master-9",
+        action: "archive",
+      },
+    });
+
+    expect(archiveCall.statusCode).toBe(200);
+    expect(archiveCall.json()).toMatchObject({
+      call: {
+        id: callId,
+        archivedByDeviceId: "master-9",
+        hiddenAt: null,
+        hiddenByDeviceId: null,
+      },
+      liveState: {
+        queue: [],
+        archives: {
+          tractorInspection: [
+            {
+              id: callId,
+              reasonCode: "tractor_inspection",
+            },
+          ],
+          other: [],
+        },
+      },
+    });
+
+    const restoreCall = await app.inject({
+      method: "POST",
+      url: `/api/yt-master-call/calls/${callId}/visibility`,
+      payload: {
+        deviceId: "master-9",
+        action: "restore",
+      },
+    });
+
+    expect(restoreCall.statusCode).toBe(200);
+    expect(restoreCall.json()).toMatchObject({
+      call: {
+        id: callId,
+        archivedAt: null,
+        archivedByDeviceId: null,
+      },
+      liveState: {
+        queue: [
+          {
+            id: callId,
+            reasonCode: "tractor_inspection",
+          },
+        ],
+        archives: {
+          tractorInspection: [],
+          other: [],
+        },
+      },
+    });
+
+    const masterLiveAfter = await app.inject({
+      method: "GET",
+      url: "/api/yt-master-call/live?deviceId=master-9",
+    });
+    expect(masterLiveAfter.statusCode).toBe(200);
+    expect(masterLiveAfter.json()).toMatchObject({
+      queue: [
+        {
+          id: callId,
+        },
+      ],
+      archives: {
+        tractorInspection: [],
+        other: [],
+      },
+    });
+
+    expect(broadcasts.map((item) => item.eventName)).toEqual([
+      "yt_master_call_role_updated",
+      "yt_master_call_role_updated",
+      "yt_master_call_changed",
+      "yt_master_call_changed",
+      "yt_master_call_changed",
+    ]);
+    expect((broadcasts[3]?.payload as { type?: string })?.type).toBe("archive");
+    expect((broadcasts[4]?.payload as { type?: string })?.type).toBe("restore");
+  });
+
+  it("rejects archiving restroom calls and allows hiding them through the visibility route", async () => {
+    const broadcasts: Array<{ eventName: string; payload: unknown }> = [];
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {} as any,
+      monitorService: {} as any,
+      sseHub: {
+        broadcast(eventName: string, payload: unknown) {
+          broadcasts.push({ eventName, payload });
+        },
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+      notificationService: {
+        async dispatchToDeviceIds() {
+          return;
+        },
+      } as any,
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "master-10",
+        role: "master",
+        name: "Lee",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-50",
+        role: "driver",
+        name: "Han",
+        ytNumber: "50",
+      },
+    });
+
+    const createCall = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-50",
+        reasonCode: "restroom",
+      },
+    });
+    const callId = (createCall.json() as { currentCall?: { id?: string } }).currentCall?.id;
+
+    expect(callId).toBeTruthy();
+
+    const rejectedArchive = await app.inject({
+      method: "POST",
+      url: `/api/yt-master-call/calls/${callId}/visibility`,
+      payload: {
+        deviceId: "master-10",
+        action: "archive",
+      },
+    });
+
+    expect(rejectedArchive.statusCode).toBe(409);
+
+    const hideCall = await app.inject({
+      method: "POST",
+      url: `/api/yt-master-call/calls/${callId}/visibility`,
+      payload: {
+        deviceId: "master-10",
+        action: "hide",
+      },
+    });
+
+    expect(hideCall.statusCode).toBe(200);
+    expect(hideCall.json()).toMatchObject({
+      call: {
+        id: callId,
+        hiddenByDeviceId: "master-10",
+        archivedAt: null,
+        archivedByDeviceId: null,
+      },
+      liveState: {
+        queue: [],
+        archives: {
+          tractorInspection: [],
+          other: [],
+        },
+      },
+    });
+
+    const masterLiveAfter = await app.inject({
+      method: "GET",
+      url: "/api/yt-master-call/live?deviceId=master-10",
+    });
+    expect(masterLiveAfter.statusCode).toBe(200);
+    expect(masterLiveAfter.json()).toMatchObject({
+      queue: [],
+      archives: {
+        tractorInspection: [],
+        other: [],
+      },
+    });
+
+    expect(broadcasts.map((item) => item.eventName)).toEqual([
+      "yt_master_call_role_updated",
+      "yt_master_call_role_updated",
+      "yt_master_call_changed",
+      "yt_master_call_changed",
+    ]);
+    expect((broadcasts[3]?.payload as { type?: string })?.type).toBe("hide");
   });
 
   it("creates container protrusion as a message-only call for masters", async () => {
@@ -753,5 +1190,90 @@ describe("yt master call api", () => {
       entityKey: callId,
       body: "YT-48 Kim 기타 사유 · 컨테이너 돌출",
     });
+  });
+
+  it("blocks duplicate locked other reasons within twenty minutes at the api layer", async () => {
+    const pushed: Array<Record<string, unknown>> = [];
+    const app = Fastify();
+    createdApps.push(app);
+
+    const { registerRoutes } = await import("../src/routes/api.js");
+    await registerRoutes(app, {
+      repo: {} as any,
+      monitorService: {} as any,
+      sseHub: {
+        broadcast() {},
+      } as any,
+      cleanupService: {
+        async runCleanupOnce() {
+          return {};
+        },
+      } as any,
+      notificationService: {
+        async dispatchToDeviceIds(input: Record<string, unknown>) {
+          pushed.push(input);
+        },
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "master-lock-1",
+        role: "master",
+        name: "Lee",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-lock-1",
+        role: "driver",
+        name: "Kim",
+        ytNumber: "650",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/register",
+      payload: {
+        deviceId: "driver-lock-2",
+        role: "driver",
+        name: "Park",
+        ytNumber: "651",
+      },
+    });
+
+    const firstCreate = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-lock-1",
+        reasonCode: "other",
+        reasonDetailCode: "lunch_shuttle",
+      },
+    });
+
+    expect(firstCreate.statusCode).toBe(200);
+
+    const secondCreate = await app.inject({
+      method: "POST",
+      url: "/api/yt-master-call/calls",
+      payload: {
+        deviceId: "driver-lock-2",
+        reasonCode: "other",
+        reasonDetailCode: "lunch_shuttle",
+      },
+    });
+
+    expect(secondCreate.statusCode).toBe(409);
+    expect(secondCreate.json()).toEqual({
+      error: "같은 사유로 이미 메세지가 도달했습니다.",
+    });
+    expect(pushed).toHaveLength(1);
   });
 });

@@ -42,6 +42,8 @@ interface WorkSignal {
   rowCount: number;
   nearestEta: string | null;
   nearestEtaGapMs: number | null;
+  recognized: boolean;
+  hasStartedWork: boolean;
 }
 
 interface EquipmentSignal {
@@ -55,6 +57,8 @@ interface EquipmentSignal {
   idleStableObservations: number;
   activeFingerprints: string[];
   relevantActiveFingerprints: string[];
+  mealStopCount: number;
+  mealStopObserved: boolean;
 }
 
 function clean(text: string | null | undefined): string {
@@ -108,6 +112,10 @@ function isOperationalEquipmentId(equipmentId: string): boolean {
 
 function isNormalLogin(row: EquipmentLoginStatus): boolean {
   return Boolean(row.operatorName && row.loginText && !row.stopReason);
+}
+
+function isMealStop(row: EquipmentLoginStatus): boolean {
+  return clean(row.stopReason).includes("식사");
 }
 
 function isYtEquipmentId(equipmentId: string): boolean {
@@ -281,6 +289,7 @@ function deriveWorkSignal(html: string, seenAt: string): WorkSignal {
       nearestEtaGapMs === null
         ? null
         : summaries.find((row) => row.etaGapMs === nearestEtaGapMs)?.eta || null;
+    const hasStartedWork = summaries.some((row) => row.progressPercent > 0);
 
     return {
       ready: summaries.every((row) => row.progressPercent <= 0 && row.etaGapMs !== null && row.etaGapMs >= FUTURE_ETA_GAP_MS),
@@ -288,6 +297,8 @@ function deriveWorkSignal(html: string, seenAt: string): WorkSignal {
       rowCount: summaries.length,
       nearestEta,
       nearestEtaGapMs,
+      recognized: true,
+      hasStartedWork,
     };
   }
 
@@ -297,6 +308,8 @@ function deriveWorkSignal(html: string, seenAt: string): WorkSignal {
     rowCount: 0,
     nearestEta: null,
     nearestEtaGapMs: null,
+    recognized: false,
+    hasStartedWork: false,
   };
 }
 
@@ -343,6 +356,8 @@ function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
         rowCount: 0,
         nearestEta: null,
         nearestEtaGapMs: null,
+        recognized: true,
+        hasStartedWork: false,
       };
     }
 
@@ -369,6 +384,8 @@ function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
         rowCount: rows.length,
         nearestEta: null,
         nearestEtaGapMs: null,
+        recognized: true,
+        hasStartedWork: false,
       };
     }
 
@@ -385,6 +402,7 @@ function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
       nearestEtaGapMs === null
         ? null
         : summaries.find((row) => row.etaGapMs === nearestEtaGapMs)?.eta || null;
+    const hasStartedWork = summaries.some((row) => row.progressPercent > 0);
 
     return {
       ready: summaries.every((row) => row.progressPercent <= 0 && row.etaGapMs !== null && row.etaGapMs >= FUTURE_ETA_GAP_MS),
@@ -392,6 +410,8 @@ function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
       rowCount: summaries.length,
       nearestEta,
       nearestEtaGapMs,
+      recognized: true,
+      hasStartedWork,
     };
   }
 
@@ -401,6 +421,8 @@ function deriveCurrentWorkSignal(html: string, seenAt: string): WorkSignal {
     rowCount: 0,
     nearestEta: null,
     nearestEtaGapMs: null,
+    recognized: false,
+    hasStartedWork: false,
   };
 }
 
@@ -415,6 +437,7 @@ function deriveEquipmentSignal(
   const activeFingerprints = activeRows.map(activeFingerprint);
   const ytActiveRows = activeRows.filter((row) => isYtEquipmentId(row.equipmentId));
   const supportActiveRows = activeRows.filter((row) => isSupportEquipmentId(row.equipmentId));
+  const mealStopRows = eligible.filter(isMealStop);
   const relevantActiveRows =
     ytActiveRows.length === 0
       ? activeRows.filter((row) => !isSupportEquipmentId(row.equipmentId))
@@ -442,6 +465,8 @@ function deriveEquipmentSignal(
     idleStableObservations: stableIdleObservations,
     activeFingerprints: [...activeFingerprints].sort(),
     relevantActiveFingerprints: [...relevantActiveFingerprints].sort(),
+    mealStopCount: mealStopRows.length,
+    mealStopObserved: mealStopRows.length > 0,
   };
 }
 
@@ -465,6 +490,8 @@ export class GwctCadenceGovernor {
     rowCount: 0,
     nearestEta: null,
     nearestEtaGapMs: null,
+    recognized: false,
+    hasStartedWork: false,
   };
   private equipmentSignal: EquipmentSignal = {
     ready: false,
@@ -477,6 +504,8 @@ export class GwctCadenceGovernor {
     idleStableObservations: 0,
     activeFingerprints: [],
     relevantActiveFingerprints: [],
+    mealStopCount: 0,
+    mealStopObserved: false,
   };
 
   constructor(private readonly logger: Pick<FastifyBaseLogger, "info">) {}
@@ -512,7 +541,10 @@ export class GwctCadenceGovernor {
       this.lastEquipmentFingerprintKey = fingerprintKey(this.equipmentSignal.relevantActiveFingerprints);
     }
 
-    if (this.mode === "relaxed" && input.source === "gwct_equipment_status") {
+    const zeroYtOverride = this.shouldRelaxForZeroYtLogins();
+    const mealBreakOverride = this.shouldRelaxForMealBeforeWorkStart();
+
+    if (this.mode === "relaxed" && input.source === "gwct_equipment_status" && !zeroYtOverride && !mealBreakOverride) {
       const currentActive = this.equipmentSignal.relevantActiveFingerprints;
       if (
         currentActive.length > 0 &&
@@ -532,7 +564,7 @@ export class GwctCadenceGovernor {
       }
     }
 
-    const shouldRelax = this.shouldRelax(seenAtMs);
+    const shouldRelax = zeroYtOverride || mealBreakOverride || this.shouldRelaxBySignals(seenAtMs);
 
     if (this.mode === "relaxed" && !shouldRelax) {
       this.relaxedUntilShiftBoundaryAt = null;
@@ -541,6 +573,9 @@ export class GwctCadenceGovernor {
         scheduleReady: this.scheduleSignal.ready,
         workReady: this.workSignal.ready,
         equipmentReady: this.equipmentSignal.ready,
+        mealStopObserved: this.equipmentSignal.mealStopObserved,
+        workRecognized: this.workSignal.recognized,
+        workStarted: this.workSignal.hasStartedWork,
       });
       return;
     }
@@ -548,15 +583,34 @@ export class GwctCadenceGovernor {
     if (this.mode === "fast" && shouldRelax) {
       this.relaxedUntilShiftBoundaryAt = nextShiftBoundaryIso(input.seenAt);
       this.relaxedBaselineActiveFingerprints = new Set(this.equipmentSignal.relevantActiveFingerprints);
-      this.setMode("relaxed", input.seenAt, "early_off_duty_detected", {
-        relaxedUntilShiftBoundaryAt: this.relaxedUntilShiftBoundaryAt,
-        firstScheduleEta: this.scheduleSignal.firstEta,
-        workEta: this.workSignal.nearestEta,
-        activeEquipmentCount: this.equipmentSignal.activeCount,
-        ytActiveCount: this.equipmentSignal.ytActiveCount,
-        supportActiveCount: this.equipmentSignal.supportActiveCount,
-        relevantActiveCount: this.equipmentSignal.relevantActiveCount,
-      });
+      if (zeroYtOverride) {
+        this.setMode("relaxed", input.seenAt, "zero_yt_logins", {
+          relaxedUntilShiftBoundaryAt: this.relaxedUntilShiftBoundaryAt,
+          activeEquipmentCount: this.equipmentSignal.activeCount,
+          ytActiveCount: this.equipmentSignal.ytActiveCount,
+          supportActiveCount: this.equipmentSignal.supportActiveCount,
+          relevantActiveCount: this.equipmentSignal.relevantActiveCount,
+        });
+      } else if (mealBreakOverride) {
+        this.setMode("relaxed", input.seenAt, "meal_break_before_work_start", {
+          relaxedUntilShiftBoundaryAt: this.relaxedUntilShiftBoundaryAt,
+          mealStopCount: this.equipmentSignal.mealStopCount,
+          workEta: this.workSignal.nearestEta,
+          workRecognized: this.workSignal.recognized,
+          workStarted: this.workSignal.hasStartedWork,
+          rowCount: this.workSignal.rowCount,
+        });
+      } else {
+        this.setMode("relaxed", input.seenAt, "early_off_duty_detected", {
+          relaxedUntilShiftBoundaryAt: this.relaxedUntilShiftBoundaryAt,
+          firstScheduleEta: this.scheduleSignal.firstEta,
+          workEta: this.workSignal.nearestEta,
+          activeEquipmentCount: this.equipmentSignal.activeCount,
+          ytActiveCount: this.equipmentSignal.ytActiveCount,
+          supportActiveCount: this.equipmentSignal.supportActiveCount,
+          relevantActiveCount: this.equipmentSignal.relevantActiveCount,
+        });
+      }
     }
   }
 
@@ -599,7 +653,7 @@ export class GwctCadenceGovernor {
     };
   }
 
-  private shouldRelax(asOfMs: number): boolean {
+  private shouldRelaxBySignals(asOfMs: number): boolean {
     if (this.holdFastUntilShiftBoundaryAt) {
       const holdMs = Date.parse(this.holdFastUntilShiftBoundaryAt);
       if (Number.isFinite(holdMs) && asOfMs < holdMs) {
@@ -608,6 +662,14 @@ export class GwctCadenceGovernor {
     }
 
     return this.scheduleSignal.ready && this.workSignal.ready && this.equipmentSignal.ready;
+  }
+
+  private shouldRelaxForZeroYtLogins(): boolean {
+    return this.equipmentSignal.observedAt !== null && this.equipmentSignal.ytActiveCount === 0;
+  }
+
+  private shouldRelaxForMealBeforeWorkStart(): boolean {
+    return this.equipmentSignal.mealStopObserved && this.workSignal.recognized && !this.workSignal.hasStartedWork;
   }
 
   private releaseHoldIfExpired(asOfMs: number): void {
@@ -656,6 +718,8 @@ export class GwctCadenceGovernor {
       rowCount: 0,
       nearestEta: null,
       nearestEtaGapMs: null,
+      recognized: false,
+      hasStartedWork: false,
     };
     this.equipmentSignal = {
       ready: false,
@@ -668,6 +732,8 @@ export class GwctCadenceGovernor {
       idleStableObservations: 0,
       activeFingerprints: [],
       relevantActiveFingerprints: [],
+      mealStopCount: 0,
+      mealStopObserved: false,
     };
     this.lastEquipmentFingerprintKey = null;
   }

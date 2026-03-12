@@ -4,6 +4,7 @@ import type {
   YtMasterCallDecisionInput,
   YtMasterCallLiveState,
   YtMasterCallRegistrationInput,
+  YtMasterCallVisibilityInput,
 } from "@gwct/shared";
 import { API_URLS } from "./config";
 import { fetchJson } from "./fetchJson";
@@ -54,6 +55,17 @@ export async function decideYtMasterCall(
   input: YtMasterCallDecisionInput,
 ): Promise<{ liveState: YtMasterCallLiveState }> {
   return fetchJson<{ liveState: YtMasterCallLiveState }>(API_URLS.ytMasterCallDecision(callId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateYtMasterCallVisibility(
+  callId: string,
+  input: YtMasterCallVisibilityInput,
+): Promise<{ liveState: YtMasterCallLiveState }> {
+  return fetchJson<{ liveState: YtMasterCallLiveState }>(API_URLS.ytMasterCallVisibility(callId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

@@ -9,6 +9,7 @@ import {
   YtMasterCallCreateInputSchema,
   YtMasterCallDecisionInputSchema,
   YtMasterCallRegistrationInputSchema,
+  YtMasterCallVisibilityInputSchema,
 } from "@gwct/shared";
 import { z } from "zod";
 import { uid } from "../lib/id.js";
@@ -49,6 +50,7 @@ import {
   decideYtMasterCall,
   getYtMasterCallLiveState,
   saveYtMasterCallRegistration,
+  updateYtMasterCallVisibility,
   YtMasterCallServiceError,
 } from "../services/ytMasterCall/service.js";
 
@@ -733,6 +735,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
             reasonLabel: liveState.currentCall.reasonLabel,
             reasonDetailCode: liveState.currentCall.reasonDetailCode,
             reasonDetailLabel: liveState.currentCall.reasonDetailLabel,
+            reasonDetailValue: liveState.currentCall.reasonDetailValue,
             status: liveState.currentCall.status,
             createdAt: liveState.currentCall.createdAt,
           },
@@ -859,6 +862,34 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         });
       }
 
+      return result;
+    } catch (error) {
+      return sendYtMasterCallError(reply, error);
+    }
+  });
+
+  app.post("/api/yt-master-call/calls/:callId/visibility", async (request, reply) => {
+    const params = request.params as { callId?: string };
+    const callId = typeof params.callId === "string" ? params.callId.trim() : "";
+    if (!callId) {
+      return reply.code(400).send({ error: "callId is required" });
+    }
+
+    const parsed = YtMasterCallVisibilityInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    try {
+      const result = await updateYtMasterCallVisibility(callId, parsed.data);
+      deps.sseHub.broadcast("yt_master_call_changed", {
+        type: parsed.data.action,
+        deviceId: parsed.data.deviceId,
+        driverDeviceId: result.call.driverDeviceId,
+        callId: result.call.id,
+        status: result.call.status,
+        changedAt: new Date().toISOString(),
+      });
       return result;
     } catch (error) {
       return sendYtMasterCallError(reply, error);

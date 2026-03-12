@@ -1,7 +1,12 @@
 import {
+  getYtMasterCallArchiveKind,
   getYtMasterCallHandlingMode,
   getYtMasterCallReasonDetailLabel,
+  isYtMasterCallDuplicateLockedOtherSubreason,
+  normalizeYtDriverIdentityInput,
+  YT_MASTER_CALL_DUPLICATE_LOCK_WINDOW_MS,
   YT_MASTER_CALL_REASON_LABELS,
+  type YtMasterCallArchiveKind,
   type YtMasterCallCancelInput,
   type YtMasterCallCreateInput,
   type YtMasterCallDecisionInput,
@@ -11,6 +16,7 @@ import {
   type YtMasterCallQueueEntry,
   type YtMasterCallRegistration,
   type YtMasterCallRegistrationInput,
+  type YtMasterCallVisibilityInput,
 } from "@gwct/shared";
 import { uid } from "../../lib/id.js";
 import {
@@ -38,25 +44,19 @@ function normalizeName(value: string): string {
   return trimmed;
 }
 
-function normalizeYtNumber(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed.length) {
-    throw new YtMasterCallServiceError(400, "YT 번호를 입력해 주세요.");
+function normalizeDriverRegistrationIdentity(nameValue: string, ytNumberValue: string): {
+  name: string;
+  ytNumber: string;
+} {
+  try {
+    const parsed = normalizeYtDriverIdentityInput(`${ytNumberValue} ${nameValue}`);
+    return {
+      name: parsed.name,
+      ytNumber: parsed.ytNumber,
+    };
+  } catch (error) {
+    throw new YtMasterCallServiceError(400, (error as Error).message);
   }
-
-  const digitsOnly = trimmed.replace(/[^0-9]/g, "");
-  if (digitsOnly.length) {
-    return `YT-${digitsOnly}`;
-  }
-
-  const upper = trimmed.toUpperCase().replace(/\s+/g, "");
-  if (upper.startsWith("YT-")) {
-    return upper;
-  }
-  if (upper.startsWith("YT")) {
-    return `YT-${upper.slice(2)}`;
-  }
-  return upper;
 }
 
 function compareIsoAsc(left: string, right: string): number {
@@ -76,6 +76,31 @@ function compareSlotAsc(
 
 function hasPendingDriverCall(state: YtMasterCallStoredState, deviceId: string): boolean {
   return state.calls.some((call) => call.driverDeviceId === deviceId && call.status === "pending");
+}
+
+function hasRecentDuplicateLockedOtherCall(
+  state: YtMasterCallStoredState,
+  input: YtMasterCallCreateInput,
+  nowMs: number,
+): boolean {
+  if (
+    input.reasonCode !== "other" ||
+    !input.reasonDetailCode ||
+    !isYtMasterCallDuplicateLockedOtherSubreason(input.reasonDetailCode)
+  ) {
+    return false;
+  }
+
+  return state.calls.some((call) => {
+    if (call.reasonCode !== "other" || call.reasonDetailCode !== input.reasonDetailCode) {
+      return false;
+    }
+    const createdAtMs = new Date(call.createdAt).getTime();
+    if (!Number.isFinite(createdAtMs)) {
+      return false;
+    }
+    return nowMs - createdAtMs < YT_MASTER_CALL_DUPLICATE_LOCK_WINDOW_MS;
+  });
 }
 
 function buildMasterAssignments(registrations: YtMasterCallRegistration[]): YtMasterCallMasterAssignment[] {
@@ -110,8 +135,12 @@ function buildCurrentCall(state: YtMasterCallStoredState, deviceId: string): YtM
   return latestCall;
 }
 
+function isCallVisibleInMasterQueue(call: YtMasterCallQueueEntry): boolean {
+  return call.status !== "cancelled" && !call.hiddenAt && !call.archivedAt;
+}
+
 function buildMasterQueue(state: YtMasterCallStoredState): YtMasterCallQueueEntry[] {
-  const visible = state.calls.filter((call) => call.status !== "cancelled" && call.status !== "acknowledged");
+  const visible = state.calls.filter(isCallVisibleInMasterQueue);
   const pending = visible
     .filter((call) => call.status === "pending" || call.status === "sent")
     .sort((left, right) => compareIsoAsc(left.createdAt, right.createdAt));
@@ -119,6 +148,20 @@ function buildMasterQueue(state: YtMasterCallStoredState): YtMasterCallQueueEntr
     .filter((call) => call.status !== "pending" && call.status !== "sent")
     .sort((left, right) => compareIsoAsc(left.createdAt, right.createdAt));
   return [...pending, ...resolved];
+}
+
+function buildArchiveList(
+  state: YtMasterCallStoredState,
+  archiveKind: YtMasterCallArchiveKind,
+): YtMasterCallQueueEntry[] {
+  return state.calls
+    .filter((call) => {
+      if (!call.archivedAt || call.status === "cancelled" || call.hiddenAt) {
+        return false;
+      }
+      return getYtMasterCallArchiveKind(call.reasonCode) === archiveKind;
+    })
+    .sort((left, right) => compareIsoDesc(left.archivedAt || left.createdAt, right.archivedAt || right.createdAt));
 }
 
 function buildLiveStateFromState(state: YtMasterCallStoredState, deviceId: string): YtMasterCallLiveState {
@@ -131,6 +174,16 @@ function buildLiveStateFromState(state: YtMasterCallStoredState, deviceId: strin
     availableMasterSlots: buildAvailableMasterSlots(state.registrations),
     currentCall: buildCurrentCall(state, deviceId),
     queue: registration?.role === "master" ? buildMasterQueue(state) : [],
+    archives:
+      registration?.role === "master"
+        ? {
+            tractorInspection: buildArchiveList(state, "tractor_inspection"),
+            other: buildArchiveList(state, "other"),
+          }
+        : {
+            tractorInspection: [],
+            other: [],
+          },
     pendingCount: state.calls.filter((call) => call.status === "pending" || call.status === "sent").length,
   };
 }
@@ -172,11 +225,12 @@ export async function saveYtMasterCallRegistration(
         updatedAt: now,
       };
     } else {
+      const normalizedDriver = normalizeDriverRegistrationIdentity(input.name, input.ytNumber);
       nextRegistration = {
         deviceId: input.deviceId,
         role: "driver",
-        name: normalizeName(input.name),
-        ytNumber: normalizeYtNumber(input.ytNumber),
+        name: normalizeName(normalizedDriver.name),
+        ytNumber: normalizedDriver.ytNumber,
         masterSlot: null,
         registeredAt: existing?.registeredAt || now,
         updatedAt: now,
@@ -232,8 +286,12 @@ export async function createYtMasterCall(input: YtMasterCallCreateInput): Promis
     if (hasPendingDriverCall(current, input.deviceId)) {
       throw new YtMasterCallServiceError(409, "이미 대기 중인 호출이 있습니다.");
     }
+    const nowMs = Date.now();
+    if (hasRecentDuplicateLockedOtherCall(current, input, nowMs)) {
+      throw new YtMasterCallServiceError(409, "같은 사유로 이미 메세지가 도달했습니다.");
+    }
 
-    const now = new Date().toISOString();
+    const now = new Date(nowMs).toISOString();
     const handlingMode = getYtMasterCallHandlingMode(input.reasonCode, input.reasonDetailCode);
     const call: YtMasterCallQueueEntry = {
       id: uid("yt_master_call"),
@@ -246,7 +304,15 @@ export async function createYtMasterCall(input: YtMasterCallCreateInput): Promis
         input.reasonCode === "tractor_inspection" || input.reasonCode === "other"
           ? input.reasonDetailCode || null
           : null,
-      reasonDetailLabel: getYtMasterCallReasonDetailLabel(input.reasonCode, input.reasonDetailCode),
+      reasonDetailLabel: getYtMasterCallReasonDetailLabel(
+        input.reasonCode,
+        input.reasonDetailCode,
+        input.reasonDetailValue,
+      ),
+      reasonDetailValue:
+        input.reasonCode === "other" && input.reasonDetailCode === "day_off_schedule"
+          ? input.reasonDetailValue || null
+          : null,
       handlingMode,
       status: handlingMode === "message" ? "sent" : "pending",
       createdAt: now,
@@ -254,6 +320,10 @@ export async function createYtMasterCall(input: YtMasterCallCreateInput): Promis
       resolvedAt: null,
       resolvedByDeviceId: null,
       resolvedByName: null,
+      hiddenAt: null,
+      hiddenByDeviceId: null,
+      archivedAt: null,
+      archivedByDeviceId: null,
     };
 
     const nextState: YtMasterCallStoredState = {
@@ -357,6 +427,72 @@ export async function decideYtMasterCall(
       resolvedByDeviceId: registration.deviceId,
       resolvedByName: registration.name,
     };
+
+    const nextState: YtMasterCallStoredState = {
+      ...current,
+      calls: current.calls.map((call) => (call.id === callId ? updatedCall : call)),
+    };
+
+    return {
+      state: nextState,
+      result: {
+        liveState: buildLiveStateFromState(nextState, input.deviceId),
+        call: updatedCall,
+      },
+    };
+  });
+}
+
+export async function updateYtMasterCallVisibility(
+  callId: string,
+  input: YtMasterCallVisibilityInput,
+): Promise<{ liveState: YtMasterCallLiveState; call: YtMasterCallQueueEntry }> {
+  return mutateYtMasterCallState(async (current) => {
+    const registration = current.registrations.find((item) => item.deviceId === input.deviceId);
+    if (!registration || registration.role !== "master") {
+      throw new YtMasterCallServiceError(403, "YT Master 권한이 필요합니다.");
+    }
+
+    const target = current.calls.find((call) => call.id === callId);
+    if (!target) {
+      throw new YtMasterCallServiceError(404, "호출 정보를 찾을 수 없습니다.");
+    }
+    if (target.status === "cancelled") {
+      throw new YtMasterCallServiceError(409, "취소된 호출은 정리할 수 없습니다.");
+    }
+
+    const now = new Date().toISOString();
+    let updatedCall: YtMasterCallQueueEntry;
+
+    if (input.action === "hide") {
+      updatedCall = {
+        ...target,
+        hiddenAt: now,
+        hiddenByDeviceId: registration.deviceId,
+        archivedAt: null,
+        archivedByDeviceId: null,
+      };
+    } else if (input.action === "archive") {
+      if (!getYtMasterCallArchiveKind(target.reasonCode)) {
+        throw new YtMasterCallServiceError(409, "이 호출은 보관함으로 이동할 수 없습니다.");
+      }
+      updatedCall = {
+        ...target,
+        archivedAt: now,
+        archivedByDeviceId: registration.deviceId,
+        hiddenAt: null,
+        hiddenByDeviceId: null,
+      };
+    } else {
+      if (!target.archivedAt) {
+        throw new YtMasterCallServiceError(409, "보관함에 없는 호출은 복원할 수 없습니다.");
+      }
+      updatedCall = {
+        ...target,
+        archivedAt: null,
+        archivedByDeviceId: null,
+      };
+    }
 
     const nextState: YtMasterCallStoredState = {
       ...current,

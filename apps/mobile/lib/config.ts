@@ -30,6 +30,8 @@ export const API_URLS = {
     `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}`,
   ytMasterCallDecision: (callId: string) =>
     `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}/decision`,
+  ytMasterCallVisibility: (callId: string) =>
+    `${API_BASE_URL}/api/yt-master-call/calls/${encodeURIComponent(callId)}/visibility`,
   registerDevice: `${API_BASE_URL}/api/devices/register`,
   updateSettings: (deviceId: string) => `${API_BASE_URL}/api/settings/device/${encodeURIComponent(deviceId)}`,
   sse: `${API_BASE_URL}/api/stream/events`,

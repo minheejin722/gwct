@@ -10,7 +10,7 @@ import { z } from "zod";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(currentDir, "../../../data");
 const configDir = path.join(dataDir, "config");
-const configFile = path.join(configDir, "yt_master_call_state.json");
+const defaultConfigFile = path.join(configDir, "yt_master_call_state.json");
 
 const YtMasterCallStoredStateSchema = z.object({
   registrations: z.array(YtMasterCallRegistrationSchema),
@@ -26,7 +26,16 @@ const DEFAULT_STATE: YtMasterCallStoredState = {
 
 let mutationChain: Promise<void> = Promise.resolve();
 
+function resolveConfigFile(): string {
+  const override = process.env.YT_MASTER_CALL_STATE_FILE?.trim();
+  if (!override) {
+    return defaultConfigFile;
+  }
+  return path.isAbsolute(override) ? override : path.join(configDir, override);
+}
+
 export async function loadYtMasterCallState(): Promise<YtMasterCallStoredState> {
+  const configFile = resolveConfigFile();
   try {
     const raw = await readFile(configFile, "utf8");
     const parsed = YtMasterCallStoredStateSchema.safeParse(JSON.parse(raw));
@@ -46,7 +55,8 @@ export async function loadYtMasterCallState(): Promise<YtMasterCallStoredState> 
 }
 
 async function saveYtMasterCallState(state: YtMasterCallStoredState): Promise<void> {
-  await mkdir(configDir, { recursive: true });
+  const configFile = resolveConfigFile();
+  await mkdir(path.dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(state, null, 2), "utf8");
 }
 
@@ -67,6 +77,7 @@ export async function mutateYtMasterCallState<T>(
 }
 
 export async function clearYtMasterCallStateForTest(): Promise<void> {
+  const configFile = resolveConfigFile();
   await rm(configFile, { force: true });
   mutationChain = Promise.resolve();
 }

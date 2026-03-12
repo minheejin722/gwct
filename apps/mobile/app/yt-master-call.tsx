@@ -1,9 +1,11 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
   Modal,
+  Animated as NativeAnimated,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,10 +16,13 @@ import {
 } from "react-native";
 import {
   formatYtMasterCallReasonDisplay,
+  getYtMasterCallArchiveKind,
+  isYtMasterCallDayOffDateValue,
   getYtMasterCallReasonDetailLabel,
   YT_MASTER_CALL_OTHER_SUBREASON_LABELS,
   YT_MASTER_CALL_TRACTOR_SUBREASON_LABELS,
   YT_MASTER_CALL_REASON_LABELS,
+  type YtMasterCallArchiveKind,
   type YtMasterCallLiveState,
   type YtMasterCallOtherSubreason,
   type YtMasterCallReasonDetailCode,
@@ -48,6 +53,7 @@ import {
   createYtMasterCall,
   decideYtMasterCall,
   saveYtMasterCallRegistration,
+  updateYtMasterCallVisibility,
 } from "../lib/ytMasterCall";
 
 const COLORS = {
@@ -70,6 +76,137 @@ const REASON_OPTIONS: Array<{ code: YtMasterCallReason; icon: MaterialIconName }
   { code: "restroom", icon: "human-male-female" },
   { code: "other", icon: "dots-horizontal" },
 ];
+
+type MasterQueueSortField = "name" | "type" | "date";
+type MasterQueueSortDirection = "asc" | "desc";
+type DayOffDatePoint = { year: number; month: number; day: number };
+type DayOffDateDraft = { year: number; month: number; selectedDateValues: string[] };
+
+const MASTER_QUEUE_SORT_FIELDS: Array<{ field: MasterQueueSortField; label: string }> = [
+  { field: "name", label: "이름" },
+  { field: "type", label: "종류" },
+  { field: "date", label: "날짜" },
+];
+
+const DAY_OFF_MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+const DUPLICATE_LOCK_MESSAGE = "같은 사유로 이미 메세지가 도달했습니다.";
+const DUPLICATE_LOCK_TOAST_HOLD_MS = 1080;
+const DUPLICATE_LOCK_MESSAGE_MATCH = "같은 사유로 이미 메세지가 도달했습니다";
+
+function padTwoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function createDefaultDayOffDatePoint(): DayOffDatePoint {
+  const now = new Date();
+  return {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    day: now.getDate(),
+  };
+}
+
+function dayOffDatePointToTimestamp(value: DayOffDatePoint): number {
+  return new Date(value.year, value.month - 1, value.day).getTime();
+}
+
+function normalizeDayOffDatePoint(value: DayOffDatePoint): DayOffDatePoint {
+  return {
+    ...value,
+    day: Math.min(value.day, getDaysInMonth(value.year, value.month)),
+  };
+}
+
+function createDefaultDayOffDateDraft(): DayOffDateDraft {
+  const today = createDefaultDayOffDatePoint();
+  return {
+    year: today.year,
+    month: today.month,
+    selectedDateValues: [],
+  };
+}
+
+function parseDayOffDatePoint(value: string): DayOffDatePoint | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
+function buildDayOffDatePointValue(value: DayOffDatePoint): string {
+  return `${value.year}-${padTwoDigits(value.month)}-${padTwoDigits(value.day)}`;
+}
+
+function expandDayOffDateRange(start: DayOffDatePoint, end: DayOffDatePoint): string[] {
+  const values: string[] = [];
+  for (
+    let cursor = new Date(start.year, start.month - 1, start.day);
+    cursor.getTime() <= dayOffDatePointToTimestamp(end);
+    cursor.setDate(cursor.getDate() + 1)
+  ) {
+    values.push(
+      buildDayOffDatePointValue({
+        year: cursor.getFullYear(),
+        month: cursor.getMonth() + 1,
+        day: cursor.getDate(),
+      }),
+    );
+  }
+  return values;
+}
+
+function normalizeDayOffDateValues(values: string[]): string[] {
+  return [...new Set(values)]
+    .filter((item) => isYtMasterCallDayOffDateValue(item))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function parseDayOffDateValue(value: string | null | undefined): DayOffDateDraft | null {
+  if (!value || !isYtMasterCallDayOffDateValue(value)) {
+    return null;
+  }
+
+  let selectedDateValues: string[] = [];
+  if (value.includes(",")) {
+    selectedDateValues = normalizeDayOffDateValues(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    );
+  } else if (value.includes("~")) {
+    const [startValue, endValue] = value.split("~").map((item) => item.trim());
+    const start = parseDayOffDatePoint(startValue);
+    const end = parseDayOffDatePoint(endValue);
+    if (!start || !end) {
+      return null;
+    }
+    selectedDateValues = expandDayOffDateRange(start, end);
+  } else {
+    selectedDateValues = [value.trim()];
+  }
+
+  const anchorPoint =
+    parseDayOffDatePoint(selectedDateValues[0] || "") || createDefaultDayOffDatePoint();
+  return {
+    year: anchorPoint.year,
+    month: anchorPoint.month,
+    selectedDateValues,
+  };
+}
+
+function buildDayOffDateValue(draft: DayOffDateDraft): string {
+  return normalizeDayOffDateValues(draft.selectedDateValues).join(",");
+}
 
 function reasonIconName(reasonCode: YtMasterCallReason): MaterialIconName {
   if (reasonCode === "tractor_inspection") {
@@ -297,6 +434,151 @@ function formatCallReasonText(call: Pick<YtMasterCallQueueEntry, "reasonLabel" |
   return formatYtMasterCallReasonDisplay(call.reasonLabel, call.reasonDetailLabel);
 }
 
+function isDuplicateLockErrorMessage(value: string | null | undefined): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.includes(DUPLICATE_LOCK_MESSAGE_MATCH);
+}
+
+function isUnresolvedCall(call: Pick<YtMasterCallQueueEntry, "status">): boolean {
+  return call.status === "pending" || call.status === "sent";
+}
+
+function compareCreatedDesc(left: YtMasterCallQueueEntry, right: YtMasterCallQueueEntry): number {
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+}
+
+function compareCreatedAsc(left: YtMasterCallQueueEntry, right: YtMasterCallQueueEntry): number {
+  return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+}
+
+function compareTextAsc(left: string, right: string): number {
+  return left.localeCompare(right, "ko");
+}
+
+function sortDirectionLabel(field: MasterQueueSortField, direction: MasterQueueSortDirection): string {
+  if (field === "date") {
+    return direction === "desc" ? "최신 항목 순" : "오래된 항목 순";
+  }
+  return direction === "asc" ? "오름차순" : "내림차순";
+}
+
+function sortFieldLabel(field: MasterQueueSortField): string {
+  return MASTER_QUEUE_SORT_FIELDS.find((item) => item.field === field)?.label || "날짜";
+}
+
+function defaultSortDirection(field: MasterQueueSortField): MasterQueueSortDirection {
+  return field === "date" ? "desc" : "asc";
+}
+
+function toggleSortDirection(direction: MasterQueueSortDirection): MasterQueueSortDirection {
+  return direction === "asc" ? "desc" : "asc";
+}
+
+function sortMasterQueue(
+  calls: YtMasterCallQueueEntry[],
+  field: MasterQueueSortField,
+  direction: MasterQueueSortDirection,
+): YtMasterCallQueueEntry[] {
+  const sorted = [...calls];
+  sorted.sort((left, right) => {
+    if (field === "date") {
+      return direction === "desc" ? compareCreatedDesc(left, right) : compareCreatedAsc(left, right);
+    }
+
+    let sortGap = 0;
+    if (field === "name") {
+      sortGap = compareTextAsc(left.driverName, right.driverName);
+      if (sortGap === 0) {
+        sortGap = compareTextAsc(left.ytNumber, right.ytNumber);
+      }
+    } else {
+      sortGap = compareTextAsc(formatCallReasonText(left), formatCallReasonText(right));
+    }
+
+    if (sortGap !== 0) {
+      return direction === "asc" ? sortGap : -sortGap;
+    }
+
+    return compareCreatedDesc(left, right);
+  });
+  return sorted;
+}
+
+function archiveTitle(kind: YtMasterCallArchiveKind): string {
+  return kind === "tractor_inspection" ? "트랙터 점검 보관함" : "기타 사유 보관함";
+}
+
+function SwipeableQueueCard({
+  children,
+  disabled,
+  actionLabel,
+  onSwipeAction,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  actionLabel: string;
+  onSwipeAction: () => void;
+}) {
+  const translateX = useRef(new NativeAnimated.Value(0)).current;
+
+  const resetPosition = () => {
+    NativeAnimated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      stiffness: 220,
+      damping: 24,
+      mass: 0.78,
+    }).start();
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          !disabled &&
+          gestureState.dx < -12 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 6,
+        onPanResponderMove: (_event, gestureState) => {
+          translateX.setValue(Math.max(-140, Math.min(0, gestureState.dx)));
+        },
+        onPanResponderRelease: (_event, gestureState) => {
+          if (gestureState.dx <= -92) {
+            NativeAnimated.timing(translateX, {
+              toValue: -240,
+              duration: 160,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              translateX.setValue(0);
+              if (finished) {
+                onSwipeAction();
+              }
+            });
+            return;
+          }
+          resetPosition();
+        },
+        onPanResponderTerminate: resetPosition,
+      }),
+    [disabled, onSwipeAction, translateX],
+  );
+
+  return (
+    <View style={swipeQueueStyles.wrap}>
+      <View style={swipeQueueStyles.background}>
+        <Text style={swipeQueueStyles.backgroundLabel}>{actionLabel}</Text>
+      </View>
+      <NativeAnimated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
+        <View>
+          {children}
+        </View>
+      </NativeAnimated.View>
+    </View>
+  );
+}
+
 export default function YtMasterCallScreen() {
   const { deviceId, isReady } = useLocalDeviceId();
 
@@ -327,15 +609,24 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     useState<YtMasterCallTractorSubreason | null>(null);
   const [selectedOtherSubreasonCode, setSelectedOtherSubreasonCode] =
     useState<YtMasterCallOtherSubreason | null>(null);
+  const [selectedOtherSubreasonValue, setSelectedOtherSubreasonValue] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [actingCallId, setActingCallId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [masterSortField, setMasterSortField] = useState<MasterQueueSortField>("date");
+  const [masterSortDirection, setMasterSortDirection] = useState<MasterQueueSortDirection>("desc");
+  const [masterMenuVisible, setMasterMenuVisible] = useState(false);
+  const [archiveView, setArchiveView] = useState<YtMasterCallArchiveKind | null>(null);
   const [detailPickerReason, setDetailPickerReason] = useState<"tractor_inspection" | "other" | null>(null);
+  const [dayOffDatePickerVisible, setDayOffDatePickerVisible] = useState(false);
+  const [dayOffDateDraft, setDayOffDateDraft] = useState<DayOffDateDraft>(() => createDefaultDayOffDateDraft());
+  const [dayOffDateReturnToOtherDetailPicker, setDayOffDateReturnToOtherDetailPicker] = useState(false);
   const [driverEditVisible, setDriverEditVisible] = useState(false);
   const [driverYtNumberDraft, setDriverYtNumberDraft] = useState("");
   const [driverEditError, setDriverEditError] = useState<string | null>(null);
   const [savingDriverYtNumber, setSavingDriverYtNumber] = useState(false);
   const [driverEditMounted, setDriverEditMounted] = useState(false);
+  const [duplicateLockToastVisible, setDuplicateLockToastVisible] = useState(false);
   const driverEditProgress = useSharedValue(0);
   const driverEditInputRef = useRef<TextInput | null>(null);
   const driverEditFocusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -345,6 +636,10 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
   const driverEditDismissKeyboardAfterCloseRef = useRef(false);
   const detailLongPressHandledReasonRef = useRef<"tractor_inspection" | "other" | null>(null);
   const detailLongPressResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const duplicateLockToastOpacity = useRef(new NativeAnimated.Value(0)).current;
+  const duplicateLockToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMaster = data?.registration?.role === "master";
+  const inlineActionError = isDuplicateLockErrorMessage(actionError) ? null : actionError;
 
   useHeaderScrollToTop(["yt-master-call"], scrollRef);
 
@@ -354,6 +649,54 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     }
     setDriverYtNumberDraft(data.registration.ytNumber ? data.registration.ytNumber.replace(/^YT-/, "") : "");
   }, [data?.registration]);
+
+  useEffect(() => {
+    if (!isDuplicateLockErrorMessage(actionError)) {
+      return;
+    }
+
+    if (duplicateLockToastTimeoutRef.current) {
+      clearTimeout(duplicateLockToastTimeoutRef.current);
+      duplicateLockToastTimeoutRef.current = null;
+    }
+
+    duplicateLockToastOpacity.stopAnimation();
+    duplicateLockToastOpacity.setValue(0);
+    setDuplicateLockToastVisible(true);
+
+    NativeAnimated.timing(duplicateLockToastOpacity, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+
+      duplicateLockToastTimeoutRef.current = setTimeout(() => {
+        duplicateLockToastTimeoutRef.current = null;
+        NativeAnimated.timing(duplicateLockToastOpacity, {
+          toValue: 0,
+          duration: 340,
+          useNativeDriver: true,
+        }).start(({ finished: fadeFinished }) => {
+          if (fadeFinished) {
+            setDuplicateLockToastVisible(false);
+          }
+        });
+      }, DUPLICATE_LOCK_TOAST_HOLD_MS);
+    });
+  }, [actionError, duplicateLockToastOpacity]);
+
+  useEffect(() => {
+    return () => {
+      if (duplicateLockToastTimeoutRef.current) {
+        clearTimeout(duplicateLockToastTimeoutRef.current);
+        duplicateLockToastTimeoutRef.current = null;
+      }
+      duplicateLockToastOpacity.stopAnimation();
+    };
+  }, [duplicateLockToastOpacity]);
 
   useEffect(() => {
     cancelAnimation(driverEditProgress);
@@ -441,6 +784,24 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     };
   }, []);
 
+  const currentMasterSortDirection = masterSortDirection;
+  const sortedMasterQueue = useMemo(
+    () => sortMasterQueue(data?.queue || [], masterSortField, currentMasterSortDirection),
+    [currentMasterSortDirection, data?.queue, masterSortField],
+  );
+  const tractorArchiveItems = useMemo(
+    () => sortMasterQueue(data?.archives.tractorInspection || [], masterSortField, currentMasterSortDirection),
+    [currentMasterSortDirection, data?.archives.tractorInspection, masterSortField],
+  );
+  const otherArchiveItems = useMemo(
+    () => sortMasterQueue(data?.archives.other || [], masterSortField, currentMasterSortDirection),
+    [currentMasterSortDirection, data?.archives.other, masterSortField],
+  );
+  const visiblePendingCount = useMemo(
+    () => sortedMasterQueue.filter(isUnresolvedCall).length,
+    [sortedMasterQueue],
+  );
+
   const finalizeDriverEditClose = () => {
     if (!driverEditClosingRef.current) {
       setDriverEditMounted(false);
@@ -505,14 +866,81 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     setSelectedReason(reasonCode);
     setSelectedTractorSubreasonCode(null);
     setSelectedOtherSubreasonCode(null);
+    setSelectedOtherSubreasonValue(null);
+    setDayOffDatePickerVisible(false);
+    setDayOffDateReturnToOtherDetailPicker(false);
   };
 
   const openDetailPicker = (reasonCode: "tractor_inspection" | "other") => {
     markDetailLongPressHandled(reasonCode);
+    setDayOffDateReturnToOtherDetailPicker(false);
     setDetailPickerReason(reasonCode);
   };
 
   const closeDetailPicker = () => {
+    setDetailPickerReason(null);
+    setDayOffDatePickerVisible(false);
+    setDayOffDateReturnToOtherDetailPicker(false);
+  };
+
+  const openDayOffDatePicker = (
+    value?: string | null,
+    options?: { returnToOtherDetailPicker?: boolean },
+  ) => {
+    setDayOffDateDraft(parseDayOffDateValue(value) || createDefaultDayOffDateDraft());
+    setDayOffDateReturnToOtherDetailPicker(Boolean(options?.returnToOtherDetailPicker));
+    setDetailPickerReason(null);
+    setDayOffDatePickerVisible(true);
+  };
+
+  const closeDayOffDatePicker = (options?: { reopenOtherDetailPicker?: boolean }) => {
+    setDayOffDatePickerVisible(false);
+    const shouldReopenOtherDetailPicker =
+      options?.reopenOtherDetailPicker ?? dayOffDateReturnToOtherDetailPicker;
+    setDayOffDateReturnToOtherDetailPicker(false);
+    if (shouldReopenOtherDetailPicker) {
+      setDetailPickerReason("other");
+    }
+  };
+
+  const handleSelectDayOffMonth = (month: number) => {
+    setDayOffDateDraft((current) => ({
+      ...current,
+      month,
+    }));
+  };
+
+  const handleToggleDayOffDay = (day: number) => {
+    setDayOffDateDraft((current) => {
+      const nextDateValue = buildDayOffDatePointValue({
+        year: current.year,
+        month: current.month,
+        day,
+      });
+      const isSelected = current.selectedDateValues.includes(nextDateValue);
+      return {
+        ...current,
+        selectedDateValues: normalizeDayOffDateValues(
+          isSelected
+            ? current.selectedDateValues.filter((value) => value !== nextDateValue)
+            : current.selectedDateValues.concat(nextDateValue),
+        ),
+      };
+    });
+  };
+
+  const handleApplyDayOffDate = () => {
+    const reasonDetailValue = buildDayOffDateValue(dayOffDateDraft);
+    if (!reasonDetailValue) {
+      setActionError("휴무일정 날짜를 한 개 이상 선택해 주세요.");
+      return;
+    }
+    setSelectedReason("other");
+    setSelectedOtherSubreasonCode("day_off_schedule");
+    setSelectedOtherSubreasonValue(reasonDetailValue);
+    setSelectedTractorSubreasonCode(null);
+    setDayOffDatePickerVisible(false);
+    setDayOffDateReturnToOtherDetailPicker(false);
     setDetailPickerReason(null);
   };
 
@@ -520,25 +948,40 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     setSelectedReason("tractor_inspection");
     setSelectedTractorSubreasonCode(subreasonCode);
     setSelectedOtherSubreasonCode(null);
+    setSelectedOtherSubreasonValue(null);
+    setDayOffDatePickerVisible(false);
     setDetailPickerReason(null);
   };
 
   const handleSelectOtherSubreason = (subreasonCode: YtMasterCallOtherSubreason) => {
+    if (subreasonCode === "day_off_schedule") {
+      openDayOffDatePicker(
+        selectedOtherSubreasonCode === "day_off_schedule" ? selectedOtherSubreasonValue : null,
+        { returnToOtherDetailPicker: true },
+      );
+      return;
+    }
     setSelectedReason("other");
     setSelectedOtherSubreasonCode(subreasonCode);
+    setSelectedOtherSubreasonValue(null);
     setSelectedTractorSubreasonCode(null);
+    setDayOffDatePickerVisible(false);
     setDetailPickerReason(null);
   };
 
   const clearSelectedReasonDetail = () => {
     setSelectedTractorSubreasonCode(null);
     setSelectedOtherSubreasonCode(null);
+    setSelectedOtherSubreasonValue(null);
+    setDayOffDatePickerVisible(false);
+    setDayOffDateReturnToOtherDetailPicker(false);
     setDetailPickerReason(null);
   };
 
   const handleCreateCall = async (options?: {
     reasonCode?: YtMasterCallReason;
     reasonDetailCode?: YtMasterCallReasonDetailCode | null;
+    reasonDetailValue?: string | null;
   }) => {
     const reasonCode = options?.reasonCode || selectedReason;
     const reasonDetailCode =
@@ -547,6 +990,16 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
         : reasonCode === "other"
           ? options?.reasonDetailCode ?? selectedOtherSubreasonCode
           : null;
+    const reasonDetailValue =
+      reasonCode === "other" && reasonDetailCode === "day_off_schedule"
+        ? options?.reasonDetailValue ??
+          (selectedOtherSubreasonCode === "day_off_schedule" ? selectedOtherSubreasonValue : null)
+        : null;
+    if (reasonCode === "other" && reasonDetailCode === "day_off_schedule" && !reasonDetailValue) {
+      setActionError("휴무일정 날짜를 선택해 주세요.");
+      openDayOffDatePicker(selectedOtherSubreasonValue);
+      return;
+    }
     setSending(true);
     setActionError(null);
     try {
@@ -554,6 +1007,7 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
         deviceId,
         reasonCode,
         reasonDetailCode,
+        reasonDetailValue,
       });
       clearSelectedReasonDetail();
       setData(saved);
@@ -594,6 +1048,54 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
       setData(result.liveState);
     } catch (decisionError) {
       setActionError((decisionError as Error).message);
+    } finally {
+      setActingCallId(null);
+    }
+  };
+
+  const handleHideCall = async (callId: string) => {
+    setActingCallId(callId);
+    setActionError(null);
+    try {
+      const result = await updateYtMasterCallVisibility(callId, {
+        deviceId,
+        action: "hide",
+      });
+      setData(result.liveState);
+    } catch (visibilityError) {
+      setActionError((visibilityError as Error).message);
+    } finally {
+      setActingCallId(null);
+    }
+  };
+
+  const handleArchiveCall = async (callId: string) => {
+    setActingCallId(callId);
+    setActionError(null);
+    try {
+      const result = await updateYtMasterCallVisibility(callId, {
+        deviceId,
+        action: "archive",
+      });
+      setData(result.liveState);
+    } catch (visibilityError) {
+      setActionError((visibilityError as Error).message);
+    } finally {
+      setActingCallId(null);
+    }
+  };
+
+  const handleRestoreArchivedCall = async (callId: string) => {
+    setActingCallId(callId);
+    setActionError(null);
+    try {
+      const result = await updateYtMasterCallVisibility(callId, {
+        deviceId,
+        action: "restore",
+      });
+      setData(result.liveState);
+    } catch (visibilityError) {
+      setActionError((visibilityError as Error).message);
     } finally {
       setActingCallId(null);
     }
@@ -670,8 +1172,33 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     await persistDriverYtNumber(driverYtNumberDraft, { closeModal: true });
   };
 
+  const duplicateLockToast = duplicateLockToastVisible ? (
+    <NativeAnimated.View
+      pointerEvents="none"
+      style={[
+        styles.centerToastOverlay,
+        {
+          opacity: duplicateLockToastOpacity,
+          transform: [
+            {
+              scale: duplicateLockToastOpacity.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.96, 1],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <View style={styles.centerToastBubble}>
+        <Text style={styles.centerToastText}>{DUPLICATE_LOCK_MESSAGE}</Text>
+      </View>
+    </NativeAnimated.View>
+  ) : null;
+
   if (!data?.registration) {
     return (
+      <View style={styles.screenRoot}>
       <ScrollView
         ref={scrollRef}
         style={styles.screen}
@@ -688,9 +1215,11 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
             <Text style={styles.emptyButtonText}>권한 설정으로 이동</Text>
           </TactilePressable>
         </Link>
-        {actionError ? <Text style={styles.inlineError}>{actionError}</Text> : null}
+        {inlineActionError ? <Text style={styles.inlineError}>{inlineActionError}</Text> : null}
         {error ? <Text style={styles.inlineError}>{error}</Text> : null}
       </ScrollView>
+      {duplicateLockToast}
+      </View>
     );
   }
 
@@ -710,12 +1239,35 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
         : selectedReason === "other"
           ? selectedOtherSubreasonCode
           : null;
-    const selectedReasonDetailLabel = getYtMasterCallReasonDetailLabel(selectedReason, selectedReasonDetailCode);
+    const selectedReasonDetailValue =
+      selectedReason === "other" && selectedReasonDetailCode === "day_off_schedule"
+        ? selectedOtherSubreasonValue
+        : null;
+    const selectedReasonDetailLabel = getYtMasterCallReasonDetailLabel(
+      selectedReason,
+      selectedReasonDetailCode,
+      selectedReasonDetailValue,
+    );
     const selectedReasonSummary =
       selectedReasonDetailLabel
         ? formatYtMasterCallReasonDisplay(YT_MASTER_CALL_REASON_LABELS[selectedReason], selectedReasonDetailLabel)
         : YT_MASTER_CALL_REASON_LABELS[selectedReason];
     const detailPickerTitle = detailPickerReason === "tractor_inspection" ? "트랙터 점검 사유" : "기타 사유";
+    const selectedDayOffDatePreview = getYtMasterCallReasonDetailLabel(
+      "other",
+      "day_off_schedule",
+      buildDayOffDateValue(dayOffDateDraft),
+    );
+    const normalizedDayOffDateValues = normalizeDayOffDateValues(dayOffDateDraft.selectedDateValues);
+    const selectedDayOffDateSet = new Set(normalizedDayOffDateValues);
+    const selectedDayOffDatePreviewText =
+      normalizedDayOffDateValues.length && selectedDayOffDatePreview
+        ? selectedDayOffDatePreview
+        : "날짜를 한 개 이상 선택해 주세요.";
+    const selectableDayOffDays = Array.from(
+      { length: getDaysInMonth(dayOffDateDraft.year, dayOffDateDraft.month) },
+      (_, index) => index + 1,
+    );
     const driverIdentityControl = (
       <Pressable style={styles.driverIdentityPressable} hitSlop={8} delayLongPress={220} onLongPress={openDriverEdit}>
         <View style={styles.driverIdentityBlock}>
@@ -727,6 +1279,7 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
 
     return (
       <>
+        <View style={styles.screenRoot}>
         <ScrollView
           ref={scrollRef}
           style={styles.screen}
@@ -812,7 +1365,7 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
               <MaterialCommunityIcons name="email-check-outline" size={34} color={COLORS.blue} />
               <Text style={[styles.statusCardText, styles.messageStatusTitle]}>메시지가 접수되었습니다.</Text>
               <Text style={styles.messageReasonText}>{formatCallReasonText(sentMessageCall)}</Text>
-              <Text style={styles.messageStatusHint}>반장이 확인하면 자동으로 사라집니다.</Text>
+              <Text style={styles.messageStatusHint}>반장이 확인하면 확인됨으로 표시됩니다.</Text>
             </View>
           </View>
         ) : data.currentCall?.status === "approved" ? (
@@ -860,9 +1413,11 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
           </TactilePressable>
         ) : null}
 
-          {actionError ? <Text style={styles.inlineError}>{actionError}</Text> : null}
+          {inlineActionError ? <Text style={styles.inlineError}>{inlineActionError}</Text> : null}
           {error ? <Text style={styles.inlineError}>{error}</Text> : null}
         </ScrollView>
+        {duplicateLockToast}
+        </View>
         <Modal
           visible={detailPickerReason !== null}
           transparent
@@ -923,7 +1478,15 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
                         <Text style={styles.tractorSubreasonGroupTitle}>{group.title}</Text>
                         <View style={styles.tractorSubreasonChipWrap}>
                           {group.items.map((subreasonCode) => {
-                            const subreasonLabel = YT_MASTER_CALL_OTHER_SUBREASON_LABELS[subreasonCode];
+                            const subreasonLabel =
+                              getYtMasterCallReasonDetailLabel(
+                                "other",
+                                subreasonCode,
+                                subreasonCode === "day_off_schedule" &&
+                                  selectedOtherSubreasonCode === "day_off_schedule"
+                                  ? selectedOtherSubreasonValue
+                                  : null,
+                              ) || YT_MASTER_CALL_OTHER_SUBREASON_LABELS[subreasonCode];
                             const selected = selectedReason === "other" && selectedOtherSubreasonCode === subreasonCode;
                             return (
                               <TactilePressable
@@ -950,6 +1513,104 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
                       </View>
                     ))}
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          visible={dayOffDatePickerVisible}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => closeDayOffDatePicker()}
+        >
+          <View style={styles.dayOffDateModalRoot}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => closeDayOffDatePicker()} />
+            <View style={styles.dayOffDateSheet}>
+              <View style={styles.dayOffDateHeader}>
+                <View style={styles.dayOffDateHeaderTextWrap}>
+                  <Text style={styles.dayOffDateTitle}>휴무일정 날짜</Text>
+                  <Text style={styles.dayOffDateYearText}>{normalizedDayOffDateValues.length}일 선택</Text>
+                </View>
+                <Pressable hitSlop={8} onPress={() => closeDayOffDatePicker()}>
+                  <Text style={styles.dayOffDateClose}>닫기</Text>
+                </Pressable>
+              </View>
+              <View style={styles.dayOffDateSection}>
+                <Text style={styles.dayOffDateSectionTitle}>월</Text>
+                <View style={styles.dayOffDateChipWrap}>
+                  {DAY_OFF_MONTH_OPTIONS.map((month) => {
+                    const selected = dayOffDateDraft.month === month;
+                    return (
+                      <TactilePressable
+                        key={month}
+                        variant="compact"
+                        style={[styles.dayOffDateChip, selected ? styles.dayOffDateChipSelected : null]}
+                        onPress={() => handleSelectDayOffMonth(month)}
+                      >
+                        <Text
+                          style={[styles.dayOffDateChipText, selected ? styles.dayOffDateChipTextSelected : null]}
+                        >
+                          {month}월
+                        </Text>
+                      </TactilePressable>
+                    );
+                  })}
+                </View>
+              </View>
+              <View style={styles.dayOffDateSection}>
+                <Text style={styles.dayOffDateSectionTitle}>일</Text>
+                <ScrollView
+                  style={styles.dayOffDateDayScroll}
+                  contentContainerStyle={styles.dayOffDateChipWrap}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {selectableDayOffDays.map((day) => {
+                    const selected = selectedDayOffDateSet.has(
+                      buildDayOffDatePointValue({
+                        year: dayOffDateDraft.year,
+                        month: dayOffDateDraft.month,
+                        day,
+                      }),
+                    );
+                    return (
+                      <TactilePressable
+                        key={day}
+                        variant="compact"
+                        style={[styles.dayOffDateChip, selected ? styles.dayOffDateChipSelected : null]}
+                        onPress={() => handleToggleDayOffDay(day)}
+                      >
+                        <Text
+                          style={[styles.dayOffDateChipText, selected ? styles.dayOffDateChipTextSelected : null]}
+                        >
+                          {day}일
+                        </Text>
+                      </TactilePressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+              <View style={styles.dayOffDatePreviewCard}>
+                <Text style={styles.dayOffDatePreviewLabel}>선택됨</Text>
+                <Text style={styles.dayOffDatePreviewText}>
+                  {selectedDayOffDatePreviewText}
+                </Text>
+              </View>
+              <View style={styles.dayOffDateActionRow}>
+                <TactilePressable
+                  style={[styles.dayOffDateActionButton, styles.dayOffDateCancelButton]}
+                  variant="compact"
+                  onPress={() => closeDayOffDatePicker()}
+                >
+                  <Text style={styles.dayOffDateCancelText}>취소</Text>
+                </TactilePressable>
+                <TactilePressable
+                  style={[styles.dayOffDateActionButton, styles.dayOffDateConfirmButton]}
+                  variant="compact"
+                  onPress={handleApplyDayOffDate}
+                >
+                  <Text style={styles.dayOffDateConfirmText}>적용</Text>
+                </TactilePressable>
+              </View>
             </View>
           </View>
         </Modal>
@@ -1015,6 +1676,316 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
     );
   }
 
+  const currentSortDirectionLabel = sortDirectionLabel(masterSortField, currentMasterSortDirection);
+  const currentSortSummary = `${sortFieldLabel(masterSortField)} · ${currentSortDirectionLabel}`;
+  const activeArchiveItems =
+    archiveView === "tractor_inspection"
+      ? tractorArchiveItems
+      : archiveView === "other"
+        ? otherArchiveItems
+        : [];
+  const activeArchiveTitle = archiveView ? archiveTitle(archiveView) : "";
+
+  const closeMasterMenu = () => {
+    setMasterMenuVisible(false);
+  };
+
+  const handleToggleCurrentMasterSortDirection = () => {
+    setMasterSortDirection((current) => toggleSortDirection(current));
+  };
+
+  const handleSelectMasterSortField = (field: MasterQueueSortField) => {
+    if (masterSortField === field) {
+      setMasterSortDirection((current) => toggleSortDirection(current));
+    } else {
+      setMasterSortField(field);
+      setMasterSortDirection(defaultSortDirection(field));
+    }
+    setMasterMenuVisible(false);
+  };
+
+  const currentDirectionLabelForMenu = sortDirectionLabel(masterSortField, currentMasterSortDirection);
+
+  const openArchiveView = (kind: YtMasterCallArchiveKind) => {
+    setArchiveView(kind);
+    setMasterMenuVisible(false);
+  };
+
+  const renderMasterQueueCard = (
+    call: YtMasterCallQueueEntry,
+    options?: {
+      archived?: boolean;
+    },
+  ) => {
+    const archived = Boolean(options?.archived);
+    const busy = actingCallId === call.id;
+    const swipeArchiveKind = getYtMasterCallArchiveKind(call.reasonCode);
+    const swipeActionLabel = swipeArchiveKind ? "보관" : "삭제";
+    const handleSwipeQueueAction = swipeArchiveKind
+      ? () => void handleArchiveCall(call.id)
+      : () => void handleHideCall(call.id);
+    const card = (
+      <View style={[styles.queueCard, archived ? styles.archiveCard : null, busy ? styles.queueCardDisabled : null]}>
+        <View style={styles.queueTopRow}>
+          <View>
+            <Text style={styles.queueYtNo}>{call.ytNumber}</Text>
+            <Text style={styles.queueDriverName}>{call.driverName}</Text>
+          </View>
+          <View style={styles.queueTopMeta}>
+            <Text style={styles.queueTime}>{formatClock(call.createdAt)}</Text>
+            {archived && call.archivedAt ? <Text style={styles.queueArchiveStamp}>보관 {formatClock(call.archivedAt)}</Text> : null}
+          </View>
+        </View>
+
+        <View style={styles.queueDivider} />
+
+        <View style={styles.queueStatusRow}>
+          <View style={styles.queueReasonWrap}>
+            <MaterialCommunityIcons
+              name={reasonIconName(call.reasonCode)}
+              size={28}
+              color={call.reasonCode === "emergency_accident" ? COLORS.red : COLORS.subtext}
+            />
+            <Text style={styles.queueReasonText}>{formatCallReasonText(call)}</Text>
+          </View>
+          <Text style={[styles.queueStatusText, { color: statusTone(call.status) }]}>{formatStatusText(call.status)}</Text>
+        </View>
+
+        {archived ? (
+          <>
+            <Text style={styles.resolvedMeta}>
+              {call.resolvedByName ? `처리자: ${call.resolvedByName} · 보관됨` : "보관됨"}
+            </Text>
+            <View style={styles.actionRow}>
+              <TactilePressable
+                style={[styles.archiveRestoreButton, busy ? styles.actionDisabled : null]}
+                disabled={busy}
+                onPress={() => void handleRestoreArchivedCall(call.id)}
+              >
+                {busy ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.actionButtonText}>복원</Text>
+                )}
+              </TactilePressable>
+            </View>
+          </>
+        ) : call.handlingMode === "decision" && call.status === "pending" ? (
+          <View style={styles.actionRow}>
+            <TactilePressable
+              style={[styles.approveButton, busy ? styles.actionDisabled : null]}
+              disabled={busy}
+              onPress={() => void handleDecision(call.id, "approved")}
+            >
+              {busy ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.actionButtonText}>승인</Text>}
+            </TactilePressable>
+
+            <TactilePressable
+              style={[styles.rejectButton, busy ? styles.actionDisabled : null]}
+              disabled={busy}
+              onPress={() => void handleDecision(call.id, "rejected")}
+            >
+              {busy ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.actionButtonText}>거절</Text>}
+            </TactilePressable>
+          </View>
+        ) : call.handlingMode === "message" && call.status === "sent" ? (
+          <View style={styles.actionRow}>
+            <TactilePressable
+              style={[styles.acknowledgeButton, busy ? styles.actionDisabled : null]}
+              disabled={busy}
+              onPress={() => void handleDecision(call.id, "acknowledged")}
+            >
+              {busy ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.actionButtonText}>확인</Text>}
+            </TactilePressable>
+          </View>
+        ) : (
+          <Text style={styles.resolvedMeta}>처리자: {call.resolvedByName || "YT Master"}</Text>
+        )}
+      </View>
+    );
+
+    if (archived) {
+      return (
+        <View key={call.id} style={styles.archiveCardWrap}>
+          {card}
+        </View>
+      );
+    }
+
+    return (
+      <SwipeableQueueCard
+        key={call.id}
+        disabled={busy}
+        actionLabel={swipeActionLabel}
+        onSwipeAction={handleSwipeQueueAction}
+      >
+        {card}
+      </SwipeableQueueCard>
+    );
+  };
+
+  return (
+    <>
+      <View style={styles.screenRoot}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refresh()} tintColor={COLORS.blue} />}
+      >
+        <View style={styles.driverHeaderRow}>
+          <Text style={styles.screenTitle}>YT Master</Text>
+          <View style={styles.masterHeaderTools}>
+            <View style={styles.driverIdentityBlock}>
+              <Text style={styles.identityCode}>{data.registration.masterSlot}</Text>
+              <Text style={styles.driverIdentityName}>{data.registration.name}</Text>
+            </View>
+            <Pressable
+              hitSlop={8}
+              style={({ pressed }) => [styles.masterMenuButton, pressed ? styles.masterMenuButtonPressed : null]}
+              onPress={() => setMasterMenuVisible(true)}
+            >
+              <MaterialCommunityIcons name="dots-horizontal" size={22} color={COLORS.text} />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.masterListHeader}>
+          <View style={styles.masterListTextWrap}>
+            <View style={styles.masterListTitleRow}>
+              <Text style={styles.masterListTitle}>호출 목록</Text>
+              <View style={styles.masterListCountBadge}>
+                <Text style={styles.masterListCountText}>{sortedMasterQueue.length}</Text>
+              </View>
+            </View>
+            <Text style={styles.masterListMeta}>미처리 {visiblePendingCount} · {currentSortSummary}</Text>
+          </View>
+          <Pressable
+            hitSlop={8}
+            style={({ pressed }) => [styles.masterSortToggleButton, pressed ? styles.masterMenuButtonPressed : null]}
+            onPress={handleToggleCurrentMasterSortDirection}
+          >
+            <MaterialCommunityIcons
+              name={currentMasterSortDirection === "asc" ? "sort-ascending" : "sort-descending"}
+              size={20}
+              color={COLORS.text}
+            />
+          </Pressable>
+        </View>
+
+        <Text style={styles.masterGestureHint}>왼쪽으로 밀면 점검/기타는 보관 · 나머지는 삭제</Text>
+
+        {sortedMasterQueue.length ? (
+          sortedMasterQueue.map((call) => renderMasterQueueCard(call))
+        ) : (
+          <View style={styles.queueCard}>
+            <Text style={styles.emptyQueueText}>들어온 호출이 없습니다.</Text>
+          </View>
+        )}
+
+        {inlineActionError ? <Text style={styles.inlineError}>{inlineActionError}</Text> : null}
+        {error ? <Text style={styles.inlineError}>{error}</Text> : null}
+      </ScrollView>
+      {duplicateLockToast}
+      </View>
+
+      <Modal
+        visible={Boolean(isMaster && masterMenuVisible)}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeMasterMenu}
+        >
+          <View style={styles.masterMenuModalRoot}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeMasterMenu} />
+            <View style={styles.masterMenuSheet}>
+              {MASTER_QUEUE_SORT_FIELDS.map((option) => {
+                const selected = option.field === masterSortField;
+                return (
+                  <Pressable
+                    key={option.field}
+                    style={styles.masterMenuOption}
+                    onPress={() => handleSelectMasterSortField(option.field)}
+                  >
+                    <View style={styles.masterMenuCheckWrap}>
+                      {selected ? (
+                        <MaterialCommunityIcons name="check" size={18} color={COLORS.blue} />
+                      ) : null}
+                    </View>
+                    <View style={styles.masterMenuOptionTextWrap}>
+                      <Text style={styles.masterMenuOptionLabel}>{option.label}</Text>
+                      {selected ? (
+                        <Text style={styles.masterMenuOptionMeta}>{currentDirectionLabelForMenu}</Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+
+              <View style={styles.masterMenuDivider} />
+
+              <Pressable style={styles.masterMenuOption} onPress={() => openArchiveView("tractor_inspection")}>
+                <View style={styles.masterArchiveLead}>
+                  <MaterialCommunityIcons name="folder-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.masterMenuOptionLabel}>YT</Text>
+                </View>
+                <View style={styles.masterMenuCountBadge}>
+                  <Text style={styles.masterMenuCountText}>{tractorArchiveItems.length}</Text>
+                </View>
+              </Pressable>
+              <Pressable style={styles.masterMenuOption} onPress={() => openArchiveView("other")}>
+                <View style={styles.masterArchiveLead}>
+                  <MaterialCommunityIcons name="folder-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.masterMenuOptionLabel}>etc.</Text>
+                </View>
+                <View style={styles.masterMenuCountBadge}>
+                  <Text style={styles.masterMenuCountText}>{otherArchiveItems.length}</Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(isMaster && archiveView)}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setArchiveView(null)}
+      >
+        <View style={styles.archiveModalRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setArchiveView(null)} />
+          <View style={styles.archiveSheet}>
+            <View style={styles.archiveHeader}>
+              <View style={styles.archiveHeaderTextWrap}>
+                <Text style={styles.archiveTitle}>{activeArchiveTitle}</Text>
+                <Text style={styles.archiveMeta}>{currentSortSummary} · {activeArchiveItems.length}건</Text>
+              </View>
+              <Pressable hitSlop={8} onPress={() => setArchiveView(null)}>
+                <Text style={styles.archiveCloseText}>닫기</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.archiveScroll}
+              contentContainerStyle={styles.archiveContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {activeArchiveItems.length ? (
+                activeArchiveItems.map((call) => renderMasterQueueCard(call, { archived: true }))
+              ) : (
+                <View style={[styles.queueCard, styles.archiveEmptyCard]}>
+                  <Text style={styles.emptyQueueText}>보관된 호출이 없습니다.</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+
+  /*
   return (
     <ScrollView
       ref={scrollRef}
@@ -1117,10 +2088,15 @@ function YtMasterCallContent({ deviceId }: { deviceId: string }) {
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
     </ScrollView>
   );
+  */
 }
 
 function createStyles() {
   return StyleSheet.create({
+    screenRoot: {
+      flex: 1,
+      backgroundColor: COLORS.screen,
+    },
     screen: {
       flex: 1,
       backgroundColor: COLORS.screen,
@@ -1169,6 +2145,11 @@ function createStyles() {
       paddingTop: 6,
       flexShrink: 1,
     },
+    masterHeaderTools: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
     driverIdentityPressable: {
       borderRadius: 16,
       marginRight: -2,
@@ -1185,6 +2166,20 @@ function createStyles() {
       color: COLORS.subtext,
       maxWidth: 128,
       textAlign: "right",
+    },
+    masterMenuButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.72)",
+      borderWidth: 1,
+      borderColor: "rgba(13, 13, 15, 0.06)",
+    },
+    masterMenuButtonPressed: {
+      backgroundColor: "rgba(17, 124, 255, 0.14)",
+      borderColor: "rgba(17, 124, 255, 0.16)",
     },
     screenTitle: {
       fontSize: 34,
@@ -1388,8 +2383,47 @@ function createStyles() {
       fontWeight: "900",
       color: COLORS.text,
     },
+    masterListTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
     masterListMeta: {
       fontSize: 15,
+      fontWeight: "700",
+      color: COLORS.subtext,
+    },
+    masterListTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    masterListCountBadge: {
+      minWidth: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: COLORS.blueSoft,
+      paddingHorizontal: 12,
+    },
+    masterListCountText: {
+      fontSize: 16,
+      fontWeight: "900",
+      color: COLORS.blue,
+    },
+    masterSortToggleButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.72)",
+      borderWidth: 1,
+      borderColor: "rgba(13, 13, 15, 0.06)",
+    },
+    masterGestureHint: {
+      marginTop: -10,
+      fontSize: 13,
       fontWeight: "700",
       color: COLORS.subtext,
     },
@@ -1405,11 +2439,26 @@ function createStyles() {
       shadowRadius: 18,
       elevation: 6,
     },
+    queueCardDisabled: {
+      opacity: 0.72,
+    },
+    archiveCard: {
+      borderWidth: 1,
+      borderColor: "rgba(17, 124, 255, 0.08)",
+    },
+    archiveCardWrap: {
+      width: "100%",
+    },
     queueTopRow: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "flex-start",
       gap: 12,
+    },
+    queueTopMeta: {
+      alignItems: "flex-end",
+      gap: 4,
+      paddingTop: 4,
     },
     queueYtNo: {
       fontSize: 30,
@@ -1428,6 +2477,11 @@ function createStyles() {
       fontWeight: "500",
       color: COLORS.subtext,
       paddingTop: 4,
+    },
+    queueArchiveStamp: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: COLORS.blue,
     },
     queueDivider: {
       height: 1,
@@ -1484,6 +2538,14 @@ function createStyles() {
       alignItems: "center",
       justifyContent: "center",
     },
+    archiveRestoreButton: {
+      flex: 1,
+      minHeight: 66,
+      borderRadius: 18,
+      backgroundColor: COLORS.text,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     actionDisabled: {
       opacity: 0.7,
     },
@@ -1531,6 +2593,175 @@ function createStyles() {
       fontSize: 14,
       fontWeight: "700",
       color: COLORS.red,
+    },
+    centerToastOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 28,
+      zIndex: 20,
+    },
+    centerToastBubble: {
+      maxWidth: 320,
+      borderRadius: 22,
+      backgroundColor: "rgba(13, 13, 15, 0.92)",
+      paddingHorizontal: 18,
+      paddingVertical: 14,
+      shadowColor: COLORS.shadow,
+      shadowOpacity: 0.22,
+      shadowOffset: { width: 0, height: 10 },
+      shadowRadius: 20,
+      elevation: 12,
+    },
+    centerToastText: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: "#ffffff",
+      textAlign: "center",
+      lineHeight: 22,
+    },
+    masterMenuModalRoot: {
+      flex: 1,
+      paddingTop: 92,
+      paddingRight: 18,
+      paddingLeft: 108,
+      alignItems: "flex-end",
+      backgroundColor: "rgba(7, 12, 22, 0.08)",
+    },
+    masterMenuSheet: {
+      width: "100%",
+      maxWidth: 248,
+      borderRadius: 26,
+      backgroundColor: "rgba(255,255,255,0.98)",
+      paddingHorizontal: 8,
+      paddingTop: 10,
+      paddingBottom: 8,
+      borderWidth: 1,
+      borderColor: "rgba(17, 124, 255, 0.08)",
+      shadowColor: COLORS.shadow,
+      shadowOpacity: 0.16,
+      shadowOffset: { width: 0, height: 14 },
+      shadowRadius: 26,
+      elevation: 12,
+    },
+    masterMenuTitle: {
+      fontSize: 22,
+      fontWeight: "900",
+      color: COLORS.text,
+      letterSpacing: -0.6,
+      marginBottom: 8,
+    },
+    masterMenuSectionLabel: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: COLORS.subtext,
+      letterSpacing: 0.2,
+      marginBottom: 6,
+    },
+    masterMenuOption: {
+      minHeight: 54,
+      borderRadius: 18,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    masterMenuCheckWrap: {
+      width: 18,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    masterMenuOptionTextWrap: {
+      flex: 1,
+    },
+    masterMenuOptionLabel: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: COLORS.text,
+      lineHeight: 22,
+    },
+    masterMenuOptionMeta: {
+      marginTop: 1,
+      fontSize: 12,
+      fontWeight: "700",
+      color: "#9599a3",
+    },
+    masterArchiveLead: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    masterMenuDivider: {
+      height: 1,
+      backgroundColor: "rgba(13, 13, 15, 0.08)",
+      marginVertical: 10,
+    },
+    masterMenuCountBadge: {
+      minWidth: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: COLORS.blueSoft,
+      paddingHorizontal: 10,
+    },
+    masterMenuCountText: {
+      fontSize: 14,
+      fontWeight: "900",
+      color: COLORS.blue,
+    },
+    archiveModalRoot: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: "rgba(7, 12, 22, 0.18)",
+    },
+    archiveSheet: {
+      maxHeight: "84%",
+      borderTopLeftRadius: 30,
+      borderTopRightRadius: 30,
+      backgroundColor: COLORS.screen,
+      paddingHorizontal: 18,
+      paddingTop: 16,
+      paddingBottom: 26,
+      gap: 14,
+    },
+    archiveHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    archiveHeaderTextWrap: {
+      flex: 1,
+      gap: 3,
+    },
+    archiveTitle: {
+      fontSize: 24,
+      fontWeight: "900",
+      color: COLORS.text,
+      letterSpacing: -0.8,
+    },
+    archiveMeta: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: COLORS.subtext,
+    },
+    archiveCloseText: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: COLORS.blue,
+    },
+    archiveScroll: {
+      flexGrow: 0,
+    },
+    archiveContent: {
+      gap: 12,
+      paddingBottom: 6,
+    },
+    archiveEmptyCard: {
+      alignItems: "center",
     },
     tractorSubreasonModalRoot: {
       flex: 1,
@@ -1613,6 +2844,136 @@ function createStyles() {
     },
     tractorSubreasonChipTextSelected: {
       color: COLORS.blue,
+    },
+    dayOffDateModalRoot: {
+      flex: 1,
+      justifyContent: "center",
+      paddingHorizontal: 24,
+      backgroundColor: "rgba(7, 12, 22, 0.18)",
+    },
+    dayOffDateSheet: {
+      borderRadius: 28,
+      backgroundColor: "rgba(255,255,255,0.97)",
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 14,
+      borderWidth: 1,
+      borderColor: "rgba(17, 124, 255, 0.08)",
+      shadowColor: COLORS.shadow,
+      shadowOpacity: 0.18,
+      shadowOffset: { width: 0, height: 18 },
+      shadowRadius: 28,
+      elevation: 12,
+      gap: 12,
+    },
+    dayOffDateHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    dayOffDateHeaderTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    dayOffDateTitle: {
+      fontSize: 24,
+      fontWeight: "900",
+      color: COLORS.text,
+      letterSpacing: -0.8,
+    },
+    dayOffDateYearText: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: COLORS.subtext,
+    },
+    dayOffDateClose: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: COLORS.blue,
+    },
+    dayOffDateSection: {
+      gap: 7,
+    },
+    dayOffDateSectionTitle: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: COLORS.subtext,
+      paddingHorizontal: 2,
+    },
+    dayOffDateChipWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    dayOffDateChip: {
+      minHeight: 40,
+      borderRadius: 14,
+      paddingHorizontal: 13,
+      paddingVertical: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "#f4f7fb",
+    },
+    dayOffDateChipSelected: {
+      backgroundColor: COLORS.blueSoft,
+    },
+    dayOffDateChipText: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: COLORS.text,
+      lineHeight: 20,
+    },
+    dayOffDateChipTextSelected: {
+      color: COLORS.blue,
+    },
+    dayOffDateDayScroll: {
+      maxHeight: 212,
+    },
+    dayOffDatePreviewCard: {
+      borderRadius: 18,
+      backgroundColor: "#f4f7fb",
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+      gap: 4,
+    },
+    dayOffDatePreviewLabel: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: COLORS.subtext,
+    },
+    dayOffDatePreviewText: {
+      fontSize: 16,
+      fontWeight: "900",
+      color: COLORS.text,
+      lineHeight: 22,
+    },
+    dayOffDateActionRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    dayOffDateActionButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    dayOffDateCancelButton: {
+      backgroundColor: "#f4f7fb",
+    },
+    dayOffDateConfirmButton: {
+      backgroundColor: COLORS.blue,
+    },
+    dayOffDateCancelText: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: COLORS.text,
+    },
+    dayOffDateConfirmText: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: "#ffffff",
     },
     driverEditModalRoot: {
       flex: 1,
@@ -1730,6 +3091,26 @@ const pendingLoaderStyles = StyleSheet.create({
     borderRadius: 30,
     alignItems: "center",
     justifyContent: "center",
+  },
+});
+
+const swipeQueueStyles = StyleSheet.create({
+  wrap: {
+    width: "100%",
+    borderRadius: 26,
+    overflow: "hidden",
+  },
+  background: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    backgroundColor: "#10151d",
+    paddingRight: 24,
+  },
+  backgroundLabel: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#ffffff",
   },
 });
 

@@ -3583,6 +3583,110 @@
   - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
   - `npm.cmd --workspace @gwct/server run typecheck`
   - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Scrape Cadence Zero-YT Override Plan (2026-03-13)
+- [x] Re-check the current cadence governor path that counts active YT logins and identify where a zero-YT override must bypass the existing AND gate and relaxed exit paths.
+- [x] Implement a top-priority rule so `ytActiveCount === 0` forces `relaxed` mode regardless of the other three signals or fast-hold state.
+- [x] Add focused cadence governor regressions for zero-YT entry and staying relaxed while non-YT login churn continues.
+- [x] Run focused verification and record the result.
+
+## Scrape Cadence Zero-YT Override Review (2026-03-13)
+- Updated `apps/server/src/services/scrapeCadence/governor.ts` so `ytActiveCount === 0` is now the highest-priority relaxed override once equipment status has been observed.
+- The new zero-YT override bypasses both the existing three-signal AND gate and the fast-hold guard, and it also suppresses the relaxed-mode equipment-login exit while YT active logins are still zero.
+- Kept the existing behavior that `stopReason` rows are not counted as normal logins, so a stopped YT still contributes to the zero-active-YT relaxed rule exactly as requested.
+- Updated `apps/server/tests/scrape-cadence-governor.test.ts` to prove:
+  - zero active YT logins now enter relaxed immediately even when schedule/work are not ready
+  - support-only churn stays relaxed while YT active logins remain zero
+  - a new active YT login still returns the governor to fast mode and re-applies the shift-boundary hold
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/scrape-cadence-governor.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+
+## YT Master Day-Off Month-Day Label Plan (2026-03-12)
+- [x] Re-check the shared day-off display format and identify the smallest change needed to drop redundant year text while keeping current-year storage intact.
+- [x] Update the shared formatter, mobile day-off picker copy, and focused expectations so selected leave dates display as month/day only.
+- [x] Re-run focused verification and record the result.
+
+## YT Master Day-Off Month-Day Label Review (2026-03-12)
+- Updated `packages/shared/src/schemas/domain.ts` so `휴무일정` display text now renders selected dates as `MM.DD` and compresses consecutive runs as `MM.DD~MM.DD`.
+- Kept the saved raw value unchanged as current-year normalized dates like `2026-03-25,2026-03-26`, so the picker and server validation still work off the full date.
+- Updated `apps/mobile/app/yt-master-call.tsx` so the leave-date picker summary no longer repeats the explicit year and only shows the selected-day count.
+- Updated focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  so stored call labels and push text now assert month/day-only display.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Duplicate Other-Reason Lock Plan (2026-03-12)
+- [x] Re-check which `기타 사유` detail codes need shared duplicate-lock classification and where create-call validation currently runs.
+- [x] Add a 20-minute same-reason lock for `이적 끝`, `본선 끝`, `교대 셔틀`, and `점심 셔틀`, and return the requested duplicate-delivery message on blocked creates.
+- [x] Add focused service/api regressions, verify them, and record the result.
+
+## YT Master Duplicate Other-Reason Lock Review (2026-03-12)
+- Added a shared duplicate-lock classification in `packages/shared/src/schemas/domain.ts` for:
+  - `교대 셔틀`
+  - `이적 끝`
+  - `본선 끝`
+  - `점심 셔틀`
+- Updated `apps/server/src/services/ytMasterCall/service.ts` so creating one of those `기타 사유` calls checks the full stored call history for the same detail code within the last 20 minutes.
+- Blocked duplicate creates now return:
+  - `같은 사유로 이미 메세지가 도달했습니다.`
+- Kept the lock window independent from current queue visibility or resolution state, so it expires by create time and then allows the next call again.
+- Added focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  to assert both the 20-minute block and the unlock after 20 minutes.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Duplicate-Lock Toast Plan (2026-03-12)
+- [x] Re-check how `actionError` is rendered in the mobile YT master-call screen and identify the smallest way to special-case the duplicate-lock text.
+- [x] Show the duplicate-lock message as a centered dissolve-style overlay instead of the inline red error text, while leaving other errors unchanged.
+- [x] Re-run mobile verification and record the result.
+
+## YT Master Duplicate-Lock Toast Review (2026-03-12)
+- Updated `apps/mobile/app/yt-master-call.tsx` so the exact duplicate-lock text:
+  - `같은 사유로 이미 메세지가 도달했습니다.`
+  now appears as a centered transient toast overlay with fade-in/fade-out motion.
+- Kept all other `actionError` cases on their existing inline red text path, so only the duplicate-lock notice changed presentation.
+- Added a screen-level overlay container and a small opacity/scale animation driven by `Animated.Value`, without changing the request logic or master/driver data flow.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Duplicate-Lock Toast Match Fix Review (2026-03-12)
+- The first toast implementation matched the duplicate-lock error with exact-string equality, which could miss live responses if the server text still carried older suffix text or whitespace differences.
+- Updated `apps/mobile/app/yt-master-call.tsx` so duplicate-lock detection now uses normalized substring matching before deciding whether to hide the inline error and show the centered toast.
+- The centered toast still renders the fixed short sentence:
+  - `같은 사유로 이미 메세지가 도달했습니다.`
+  even if the backend response contains extra legacy wording.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## Scrape Cadence Meal Relax Override Plan (2026-03-13)
+- [x] Re-check the current relaxed-mode governor path and identify where the three-signal rule and the relaxed-to-fast equipment-login exit are enforced.
+- [x] Add a separate meal-stop-before-work-start override so relax mode can enter and remain active independently of the existing three aligned idle signals.
+- [x] Add focused governor regressions, verify them, and record the result.
+
+## Scrape Cadence Meal Relax Override Review (2026-03-13)
+- Updated `apps/server/src/services/scrapeCadence/governor.ts` so `식사`/`식사시간` stop reasons are tracked separately from the existing idle-equipment readiness signal.
+- Added a dedicated meal override rule:
+  - if meal stop is observed
+  - and the current work table is recognized
+  - and work progress has not started yet
+  - then scrape cadence enters or stays in `relaxed` mode even when the original three idle signals do not all align
+- Also changed the relaxed-mode equipment-login exit so meal override still wins until work progress actually starts.
+- Added focused regressions in `apps/server/tests/scrape-cadence-governor.test.ts` to cover:
+  - entering relaxed mode via the meal override without the three normal ready signals
+  - staying relaxed through login churn during meal stop
+  - returning to `fast` as soon as work progress starts
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/scrape-cadence-governor.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
   - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
 
 ## YT Driver Tractor Picker Layout Refinement Plan (2026-03-11)
@@ -3934,3 +4038,449 @@
   - `npm.cmd --workspace @gwct/mobile run typecheck`
   - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
   - removed regenerated `apps/mobile/dist-test` after verification
+
+## Relaxed Mode Status Check Plan (2026-03-12)
+- [x] Re-read the cadence-governor relaxed gate so the current answer uses the actual `schedule/work/equipment` rules instead of memory.
+- [x] Check live evidence from the running server and persisted scrape history to see whether the managed GWCT sources are currently running on relaxed or fast cadence.
+- [x] Summarize which relaxed condition is currently blocking the mode, with concrete timestamps and observed watch-window data.
+
+## Relaxed Mode Status Check Review (2026-03-12)
+- Reconfirmed from `apps/server/src/services/scrapeCadence/governor.ts` that relaxed mode is still an AND gate:
+  - `scheduleSignal.ready`
+  - `workSignal.ready`
+  - `equipmentSignal.ready`
+- Checked the live server at `2026-03-12 18:45~18:46 KST` via `GET /api/monitors/status` and found the current schedule preview starts with two `yellow` watch-window rows:
+  - `SAWASDEE PACIFIC`
+  - `PEGASUS GRACE`
+  so the schedule-side relaxed condition is not satisfied right now.
+- Verified persisted `ScrapeRun` timing in `apps/server/data/dev.db` and found all four managed GWCT sources are still running at roughly `2.0s` cadence:
+  - `gwct_schedule_list`: avg `2007.2ms`
+  - `gwct_work_status`: avg `2006.6ms`
+  - `gwct_equipment_status`: avg `2008.4ms`
+  - `gwct_gc_remaining`: avg `2007.2ms`
+- Because the governor only relaxes when all three signals are ready, the failing schedule signal is enough to keep the entire managed GWCT set in fast mode even if work/equipment look idle.
+- Runtime evidence used:
+  - `Invoke-WebRequest http://127.0.0.1:4000/api/monitors/status`
+  - direct SQLite inspection of `apps/server/data/dev.db` recent `ScrapeRun.startedAt` rows
+
+## YT Driver Fuzzy Registration Plan (2026-03-12)
+- [x] Re-check the current YT Master Driver registration flow across mobile/shared/server so the combined-input change lands in one consistent parsing path.
+- [x] Replace the separate driver `YT 번호` + `이름` entry with one tolerant combined identity input that can infer number/name from noisy mixed text.
+- [x] Add focused regression coverage for messy driver registration input variants, run targeted verification, and record the review.
+
+## YT Driver Fuzzy Registration Review (2026-03-12)
+- Reworked `apps/mobile/app/yt-master-call-settings.tsx` so `YT Driver` registration now uses one combined `YT 번호 / 이름` field instead of separate number and name inputs.
+- The driver field now accepts loose mixed input such as `600홍길동`, `홍길동600`, `6 00홍 길동`, or `60,0 홍-길.동`, and the save path automatically extracts:
+  - digits -> `YT 번호`
+  - letters -> driver name
+- Added a shared parser in `packages/shared/src/schemas/domain.ts` so both mobile and server use the same normalization rule for noisy driver identity input.
+- Updated `apps/server/src/services/ytMasterCall/service.ts` so driver registration storage also normalizes the combined number/name signal before persisting `YT-번호` and the cleaned driver name.
+- Added focused regression coverage in `apps/server/tests/yt-master-call-service.test.ts` for the user's messy-input variants and for normalized driver registration persistence.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+  - removed regenerated `apps/mobile/dist-test` after verification
+
+## YT Driver Example Text Plan (2026-03-12)
+- [x] Re-check the visible driver registration example text and limit it to the single format the user specified.
+- [x] Keep the fuzzy parsing behavior unchanged and update only the displayed example copy.
+- [x] Run quick verification and record the result.
+
+## YT Driver Example Text Review (2026-03-12)
+- Updated the visible `YT Driver` registration placeholder in `apps/mobile/app/yt-master-call-settings.tsx` from a multi-format example to the single requested example: `예: 600 홍길동`.
+- Kept the fuzzy parsing behavior unchanged; this follow-up only narrows the displayed example text.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Registration Keyboard Submit Plan (2026-03-12)
+- [x] Re-check the current registration save path so keyboard submit can reuse the exact same logic as the visible `등록` button.
+- [x] Wire both the driver combined input and the master name input so pressing the keyboard search/enter key triggers registration immediately.
+- [x] Run quick mobile verification and record the result.
+
+## YT Registration Keyboard Submit Review (2026-03-12)
+- Updated `apps/mobile/app/yt-master-call-settings.tsx` so both visible registration inputs now submit through the same `saveRole()` path as the `등록` button.
+- The `YT Driver` combined input and the `YT Master` name input now both use:
+  - `returnKeyType="search"`
+  - `onSubmitEditing={() => void saveRole()}`
+- Added a small guard in `saveRole()` so keyboard submit does not double-fire while a save or clear action is already in progress.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Emergency Runtime Test Plan (2026-03-12)
+- [x] Check the live local server and confirm whether a YT Master is currently registered to receive the test call.
+- [x] Register a dedicated test driver profile as `YT-591 / 이송택` on the live API.
+- [x] Create a live `긴급 사고` call for that driver and verify it appears in both driver live state and the master's queue.
+- [x] Clean up any temporary probe registrations used during the runtime check and record the result.
+
+## YT Emergency Runtime Test Review (2026-03-12)
+- Confirmed the local server on `http://127.0.0.1:4000` was reachable and currently had one active master registration:
+  - `MASTER-1 / 송일권`
+- Registered dedicated test driver device `codex-driver-emergency-20260312-591` as:
+  - `YT-591 / 이송택`
+- Created live emergency call `yt_master_call_2d920837-4d71-462d-bda1-6db94e0f58fd` with:
+  - `reasonCode: "emergency_accident"`
+  - `reasonLabel: "긴급 사고"`
+  - `status: "pending"`
+- Verified the same pending call in both live states:
+  - driver `codex-driver-emergency-20260312-591` current call
+  - master `송일권` queue
+- Current live result after the test:
+  - driver pending count: `1`
+  - master pending count: `1`
+  - master queue contains `YT-591 / 이송택 / 긴급 사고`
+- Removed temporary diagnostic registrations `probe-a` and `probe-b` after the check so only the requested test driver/call remains active.
+
+## YT Emergency Message-Only Plan (2026-03-12)
+- [x] Re-check where `긴급 사고` currently resolves its handling mode and identify the smallest shared change that flips it from approval-type to message-only.
+- [x] Update the shared handling-mode rule so `긴급 사고` uses the same `sent -> acknowledged` flow as other message-only YT reports, and adjust the affected server/API expectations.
+- [x] Run targeted verification and record the result.
+
+## YT Emergency Message-Only Review (2026-03-12)
+- Updated the shared YT handling-mode classifier in `packages/shared/src/schemas/domain.ts` so top-level `긴급 사고` now resolves to `handlingMode: "message"` instead of `decision`.
+- Kept the rest of the stack generic on `handlingMode`, so no special service or UI branch was needed:
+  - create path now stores new emergency calls as `status: "sent"`
+  - master queue uses the existing single `확인` action for message-only items
+  - driver side uses the existing message receipt / acknowledged flow
+- Updated the focused YT server regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  so emergency calls now assert `handlingMode: "message"` and `status: "sent"`.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Emergency Message Runtime Rerun (2026-03-12)
+- Re-registered live test driver device `codex-driver-emergency-20260312-591` as `YT-591 / 이송택`.
+- Created a fresh live emergency call `yt_master_call_18e287be-1ff0-4e42-82b6-b31b2f3af582`.
+- Verified the new runtime behavior is now message-only on the live API:
+  - `reasonCode: "emergency_accident"`
+  - `handlingMode: "message"`
+  - `status: "sent"`
+- Verified the same call in both live states:
+  - driver `codex-driver-emergency-20260312-591` current call
+  - master `송일권` queue
+- Current live result:
+  - driver pending count: `1`
+  - master pending count: `1`
+  - master queue contains `YT-591 / 이송택 / 긴급 사고` as a message-only item awaiting `확인`
+
+## YT Spring Runtime Test (2026-03-12)
+- After the earlier emergency message was acknowledged and the master queue became empty again, created a fresh live tractor-inspection call for the same test driver:
+  - device: `codex-driver-emergency-20260312-591`
+  - driver: `YT-591 / 이송택`
+  - detail: `spring_break_3plus`
+- Created call `yt_master_call_011367d0-e352-4f47-8ee2-5b51ae4e1ce3` with:
+  - `reasonCode: "tractor_inspection"`
+  - `reasonDetailLabel: "판스프링 3장 이상 파손"`
+  - `handlingMode: "decision"`
+  - `status: "pending"`
+- Verified the same pending call in both live states:
+  - driver current call
+  - master `송일권` queue
+- Current live result:
+  - driver pending count: `1`
+  - master pending count: `1`
+  - master queue contains `YT-591 / 이송택 / 트랙터 점검 · 판스프링 3장 이상 파손`
+
+## YT Message Acknowledged Queue Visibility Plan (2026-03-12)
+- [x] Re-check where acknowledged message-only calls are currently filtered out of the master call list.
+- [x] Keep acknowledged message-only calls visible in the master queue and update any now-wrong UI copy.
+- [x] Run focused verification and record the result.
+
+## YT Message Acknowledged Queue Visibility Review (2026-03-12)
+- Updated `apps/server/src/services/ytMasterCall/service.ts` so the master queue no longer filters out `acknowledged` message-only calls. Only `cancelled` items are hidden now.
+- Kept queue ordering unchanged:
+  - active items (`pending`, `sent`) first
+  - resolved items, including `acknowledged`, after that
+- Updated `apps/mobile/app/yt-master-call.tsx` driver-side message receipt hint from `반장이 확인하면 자동으로 사라집니다.` to `반장이 확인하면 확인됨으로 표시됩니다.` so the copy matches the new behavior.
+- Updated focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  so acknowledged message-only calls now remain visible in the master queue while `pendingCount` still drops to `0`.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Queue Control Plan (2026-03-12)
+- [x] Re-check the current YT Master call-list state contract, queue ordering, and any existing mobile interaction primitives so sorting, hide, and archive changes can share one coherent model.
+- [x] Add persisted queue-visibility actions on the backend for:
+  - [x] left-swipe hide from the main master list
+  - [x] archive move for eligible reasons only (`트랙터 점검`, `기타 사유`)
+  - [x] archive restore support so archived calls are not trapped forever
+- [x] Extend the live YT Master payload so the app receives:
+  - [x] the active main queue
+  - [x] tractor archive items
+  - [x] other-reason archive items
+- [x] Rework the mobile master list so it supports:
+  - [x] newest-first default ordering
+  - [x] a three-dot menu with list sort options
+  - [x] immediate local re-sorting when the option changes
+  - [x] swipe-left hide on main-list cards
+  - [x] long-press archive on eligible cards
+  - [x] archive viewer surfaces for tractor and other calls
+- [x] Update focused YT Master server regressions, run verification, and record the result.
+
+## YT Master Queue Control Review (2026-03-12)
+- Added persistent visibility state to YT Master calls in the shared schema and server service:
+  - hidden items leave the main master queue
+  - archived items move into `tractorInspection` or `other` archive buckets
+  - archived calls can be restored back into the live queue
+- Reworked `apps/mobile/app/yt-master-call.tsx` so the master screen now:
+  - defaults to newest-first ordering
+  - exposes a three-dot menu for sort changes and archive entry points
+  - re-sorts immediately on selection without waiting for a refetch
+  - supports swipe-left hide on main-list cards
+  - supports long-press archive on archive-eligible calls
+  - shows archive sheets with restore actions for `트랙터 점검` and `기타 사유`
+- Kept `화장실` and `긴급 사고` out of archive bins and routed them to swipe-hide only, matching the requested behavior.
+- Added focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  covering hide, archive, restore, and unsupported archive attempts.
+- Hardened the YT Master call test store so parallel service/API runs use separate test state files instead of racing on one shared JSON file.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear`
+
+## YT Master Menu Density Plan (2026-03-12)
+- [x] Re-check which menu style controls the vertical spacing between sort options in the master queue settings popover.
+- [x] Tighten only the option row height/padding so the checklist feels denser without changing the menu structure.
+- [x] Re-run mobile typecheck and record the result.
+
+## YT Master Menu Density Review (2026-03-12)
+- Tightened the vertical density of the `호출 목록 설정` sort/archive menu by reducing only the option row height and vertical padding in `apps/mobile/app/yt-master-call.tsx`.
+- Left the menu structure, labels, counts, and actions unchanged so the adjustment stays local to spacing only.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Swipe Simplification Plan (2026-03-12)
+- [x] Re-check how the current master queue card splits swipe-hide and long-press archive.
+- [x] Remove long-press archive and route swipe automatically to `보관` for archive-eligible reasons and `삭제` for the rest.
+- [x] Re-run mobile typecheck and record the result.
+
+## YT Master Swipe Simplification Review (2026-03-12)
+- Removed long-press archive from the master queue card interaction in `apps/mobile/app/yt-master-call.tsx`.
+- The swipe action now decides automatically by reason:
+  - `트랙터 점검`, `기타 사유` -> `보관`
+  - `화장실`, `긴급 사고` -> `삭제`
+- Updated the swipe background label to show the actual action (`보관` or `삭제`) per card and updated the on-screen hint to match the simplified behavior.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Menu Width Trim Plan (2026-03-12)
+- [x] Re-check which popover container styles control the overall width and inner padding of the `호출 목록 설정` card.
+- [x] Reduce only the card width and inner padding so the menu footprint shrinks without changing font sizes or interaction flow.
+- [x] Re-run mobile typecheck and record the result.
+
+## YT Master Menu Width Trim Review (2026-03-12)
+- Reduced the overall footprint of the `호출 목록 설정` popover card in `apps/mobile/app/yt-master-call.tsx` by trimming only:
+  - the card `maxWidth`
+  - the sheet's horizontal/top/bottom padding
+  - the option row's horizontal padding and icon/text gap
+- Left fonts, labels, actions, and general visual style unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Sort Menu Rework Plan (2026-03-12)
+- [x] Re-check the current `호출 목록 설정` menu and identify the smallest state change that can support `이름 / 종류 / 날짜` plus direction toggles.
+- [x] Rework the master queue header/menu so:
+  - [x] the overflow button uses horizontal dots
+  - [x] the menu title and `정렬 방식` label are removed
+  - [x] `이름`, `종류`, `날짜` rows each toggle their own direction when tapped again
+  - [x] the main header gets an up/down sort-direction button next to `호출 목록`
+  - [x] the archive rows use folder-style archive icons with `YT` / `etc.` labels
+- [x] Re-run mobile typecheck and record the result.
+
+## YT Master Sort Menu Rework Review (2026-03-12)
+- Reworked `apps/mobile/app/yt-master-call.tsx` so the master sort model is now:
+  - sort field: `이름`, `종류`, `날짜`
+  - sort direction: per-field toggle state
+- Removed the overflow-menu title copy and section heading copy the user called out, and changed the overflow trigger from vertical dots to horizontal dots.
+- Added a main-header sort-direction button beside `호출 목록` so operators can flip the current field between:
+  - `오름차순 / 내림차순`
+  - `최신 항목 순 / 오래된 항목 순`
+- Updated the archive entries in the overflow menu to use folder-style icons with short labels:
+  - `YT`
+  - `etc.`
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Header Layout Review (2026-03-12)
+- Adjusted the master list header in `apps/mobile/app/yt-master-call.tsx` so:
+  - the queue count badge now sits next to `호출 목록`
+  - the sort-direction toggle now sits at the far right edge of the header
+- Kept the sort behavior itself unchanged and verified with:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Sort Tap Close Review (2026-03-12)
+- Updated `apps/mobile/app/yt-master-call.tsx` so tapping `이름`, `종류`, or `날짜` in the overflow sort menu now:
+  - applies the sort immediately
+  - toggles the same field's direction on repeat taps
+  - closes the overflow card immediately after the tap
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Menu Width Trim Follow-up Plan (2026-03-12)
+- [x] Re-check the remaining menu footprint after the first width reduction and identify which container values still keep the overflow card too wide.
+- [x] Reduce the overflow card width more aggressively without touching fonts, icon sizes, or overall menu behavior.
+- [x] Re-run mobile typecheck and record the result.
+
+## YT Master Menu Width Trim Follow-up Review (2026-03-12)
+- Tightened the overflow card in `apps/mobile/app/yt-master-call.tsx` more aggressively by reducing:
+  - modal left padding, so the available card space is narrower
+  - menu sheet `maxWidth`
+  - menu sheet horizontal/top/bottom padding
+  - option-row horizontal and vertical padding
+- Left fonts and icon sizes unchanged.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Sort Reset Review (2026-03-12)
+- Simplified the sort state in `apps/mobile/app/yt-master-call.tsx` to one active field plus one active direction.
+- Updated field switching behavior so:
+  - repeating the same selected field toggles its direction
+  - switching to a different field resets that field to its default direction
+    - `이름`, `종류` -> `오름차순`
+    - `날짜` -> `최신 항목 순`
+- Updated the overflow menu indicator so:
+  - only the active field shows a simple left-side check mark
+  - only the active field shows the grey direction sublabel
+  - inactive fields show just the label
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Sort Highlight Review (2026-03-12)
+- Removed the blue selected-row background from the overflow sort menu in `apps/mobile/app/yt-master-call.tsx`.
+- Kept the active-state cues limited to:
+  - the simple left-side check mark
+  - the grey direction sublabel on the active row
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+
+## YT Master Day-Off Schedule Date Plan (2026-03-12)
+- [x] Re-check the current `기타 사유 > 휴무일정` flow across shared schema, server create handling, and the mobile picker UI.
+- [x] Add an attached holiday date value to the YT master-call payload/storage and include it in the displayed reason text.
+- [x] Add a simple mobile month/day selection flow that opens when `휴무일정` is chosen and reuses the selected date in the call summary.
+- [x] Re-run focused YT master-call tests/typechecks and record the review.
+
+## YT Master Day-Off Schedule Date Review (2026-03-12)
+- Extended the shared YT master-call schema in `packages/shared/src/schemas/domain.ts` with `reasonDetailValue` so `기타 사유 > 휴무일정` can carry a concrete date value.
+- Added date-aware formatting and validation in the shared layer so:
+  - `day_off_schedule` requires a valid `YYYY-MM-DD` date
+  - the displayed detail label becomes `휴무일정 YYYY.MM.DD`
+  - other reason details still reject stray extra values
+- Updated the server create flow in:
+  - `apps/server/src/services/ytMasterCall/service.ts`
+  - `apps/server/src/routes/api.ts`
+  so the selected holiday date is stored on the call, reflected in queue/current-call text, and included in the push raw payload.
+- Reworked the mobile driver flow in `apps/mobile/app/yt-master-call.tsx` so tapping `휴무일정` in `기타 사유` opens a compact `월 / 일` selection modal for the current year, then applies that choice back into the selected reason summary before send.
+- Added focused regression coverage in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  for a dated `휴무일정` call and the outbound push/body text.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Day-Off Modal Fix Plan (2026-03-12)
+- [x] Re-check the current `휴무일정` tap path and confirm why the date picker can fail to appear.
+- [x] Change the mobile flow so `휴무일정` closes the other-detail modal first, then opens only the date picker modal.
+- [x] Re-run mobile verification and record the fix and lesson.
+
+## YT Master Day-Off Modal Fix Review (2026-03-12)
+- Root cause in `apps/mobile/app/yt-master-call.tsx`:
+  - tapping `휴무일정` tried to open the date picker while the `기타 사유` detail modal was still open
+  - that left the flow dependent on stacked React Native `Modal` behavior, which can fail to present the second modal reliably on device
+- Fixed the flow so `휴무일정` now:
+  - closes the other-detail modal first
+  - opens only the date picker modal as the active surface
+  - optionally returns to the `기타 사유` picker on cancel only when that picker launched the date modal
+- Also wrapped the date-modal close handlers in no-arg lambdas so the mobile typecheck stays aligned with `Modal` / `Pressable` callback signatures.
+- Verification:
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Day-Off Range Plan (2026-03-12)
+- [x] Re-check the current single-date holiday payload and the mobile date picker flow to identify the smallest clean way to support consecutive days.
+- [x] Extend the shared/server/mobile flow so `휴무일정` can store either one date or a consecutive date range and render the right label everywhere.
+- [x] Re-run focused YT tests, typechecks, and mobile bundle verification, then record the result.
+
+## YT Master Day-Off Range Review (2026-03-12)
+- Extended `packages/shared/src/schemas/domain.ts` so `day_off_schedule` now accepts:
+  - one day: `YYYY-MM-DD`
+  - consecutive range: `YYYY-MM-DD~YYYY-MM-DD`
+- Updated shared label formatting so:
+  - single day -> `휴무일정 YYYY.MM.DD`
+  - range -> `휴무일정 YYYY.MM.DD~YYYY.MM.DD`
+- Kept the server create/store path generic in:
+  - `apps/server/src/services/ytMasterCall/service.ts`
+  - `apps/server/src/routes/api.ts`
+  so the new range value flows through the same `reasonDetailValue` and notification text path without a special branch.
+- Reworked the mobile picker in `apps/mobile/app/yt-master-call.tsx` so operators can now choose:
+  - `하루`
+  - `연속`
+  and, in range mode, switch between `시작일` and `마지막일` while the end date is clamped to stay on or after the start date.
+- Added focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  for a consecutive `휴무일정` payload and the resulting push/body text.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Day-Off Multi-Mark Plan (2026-03-12)
+- [x] Re-check the just-added range-based holiday flow and identify the smallest change to convert it into multi-date marking instead.
+- [x] Replace the range-style `휴무일정` flow with a month/day multi-select flow while keeping shared/server formatting compatible with existing stored single/range values.
+- [x] Re-run focused YT tests, typechecks, and mobile bundle verification, then record the result.
+
+## YT Master Day-Off Multi-Mark Review (2026-03-12)
+- Reworked `apps/mobile/app/yt-master-call.tsx` so `휴무일정` no longer uses `하루 / 연속` range controls.
+- The date modal now works as:
+  - choose a month
+  - tap as many day chips as needed to mark/unmark leave dates
+  - apply the selected set back into the chosen `휴무일정`
+- The mobile payload now stores selected dates as a comma-separated normalized list like:
+  - `2026-03-25,2026-03-27,2026-04-02`
+- Updated `packages/shared/src/schemas/domain.ts` so shared validation/formatting now accepts:
+  - single date values
+  - comma-separated multi-date values
+  - legacy range values for backward-compatible display
+- Updated focused YT regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  to assert the new multi-date payload and rendered label text.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
+  - `npx expo export --platform ios --output-dir dist-test --clear` in `apps/mobile`
+
+## YT Master Day-Off Range Label Plan (2026-03-12)
+- [x] Re-check the current multi-date holiday label formatting and identify the smallest shared change that can compress consecutive dates into a `~` range.
+- [x] Update shared holiday label formatting so consecutive selected dates display as `시작일~끝일` while non-consecutive dates stay comma-separated.
+- [x] Re-run focused verification and record the result.
+
+## YT Master Day-Off Range Label Review (2026-03-12)
+- Updated `packages/shared/src/schemas/domain.ts` so comma-separated `휴무일정` date lists are now formatted into consecutive segments before display.
+- The shared formatter now renders examples like:
+  - `2026-03-25,2026-03-26,2026-03-27,2026-04-02`
+  - -> `2026.03.25~2026.03.27, 2026.04.02`
+- Kept the saved raw value as the normalized comma-separated list, so the mobile multi-mark picker model did not need to change again.
+- Updated focused regressions in:
+  - `apps/server/tests/yt-master-call-service.test.ts`
+  - `apps/server/tests/yt-master-call-api.test.ts`
+  so both stored call labels and push bodies now assert the compressed `~` display for consecutive dates.
+- Verification:
+  - `npm.cmd --workspace @gwct/server run test -- --run tests/yt-master-call-service.test.ts tests/yt-master-call-api.test.ts`
+  - `npm.cmd --workspace @gwct/server run typecheck`
+  - `npm.cmd --workspace @gwct/mobile run typecheck`
